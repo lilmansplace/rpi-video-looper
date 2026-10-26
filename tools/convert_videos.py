@@ -62,8 +62,10 @@ def probe(path: str) -> dict:
     }
 
 
-def reasons_for(info: dict, ext: str) -> list[str]:
+def reasons_for(info: dict, ext: str, max_h: int = 1080) -> list[str]:
     r = compat.check(info["codec"], info["width"], info["height"], info["fps"], hwdec=None)
+    if not r and info["height"] and info["height"] > max_h + 8:
+        r.append(f"{info['height']}p is above --max-height {max_h}")
     pf = info.get("pix_fmt") or ""
     if info["codec"] == "h264" and pf and pf not in ("yuv420p", "yuvj420p"):
         r.append(f"{pf} pixel format isn't hardware-decoded (needs 8-bit 4:2:0)")
@@ -72,11 +74,12 @@ def reasons_for(info: dict, ext: str) -> list[str]:
     return r
 
 
-def build_cmd(src: str, dst: str, info: dict, crf: int, preset: str) -> list[str]:
-    w, h = info["width"] or 1920, info["height"] or 1080
-    scale = min(1.0, 1920 / w, 1080 / h)
+def build_cmd(src: str, dst: str, info: dict, crf: int, preset: str, max_h: int = 1080) -> list[str]:
+    max_w = max_h * 16 // 9
+    w, h = info["width"] or max_w, info["height"] or max_h
+    scale = min(1.0, max_w / w, max_h / h)
     out_h = int(h * scale)
-    vf = ["scale='min(1920,iw)':'min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"]
+    vf = [f"scale='min({max_w},iw)':'min({max_h},ih)':force_original_aspect_ratio=decrease:force_divisible_by=2"]
     fps = info["fps"] or 0
     if fps > 31 and out_h > 720:
         vf.append("fps=30")
@@ -118,6 +121,8 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="only report which files need converting")
     ap.add_argument("--no-copy", action="store_true", help="don't copy files that are already fine")
     ap.add_argument("--crf", type=int, default=20, help="quality, lower = better/bigger (default 20)")
+    ap.add_argument("--max-height", type=int, default=1080,
+                    help="largest output height (default 1080). 720 is much lighter for a Pi Zero W")
     ap.add_argument("--preset", default="medium", help="x264 preset: faster | medium | slow (default medium)")
     args = ap.parse_args()
 
@@ -153,7 +158,7 @@ def main() -> int:
         if not info["codec"]:
             print(f"  ?  {rel}: no video stream")
             continue
-        why = reasons_for(info, os.path.splitext(f)[1].lower())
+        why = reasons_for(info, os.path.splitext(f)[1].lower(), args.max_height)
         desc = f"{info['codec']} {info['width']}x{info['height']} {info['fps'] or 0:.0f}fps"
         if why:
             print(f"  ✗  {rel}  [{desc}]")
@@ -188,7 +193,7 @@ def main() -> int:
         print(f"convert  [{i}/{len(todo)}] {rel}")
         t0 = time.time()
         try:
-            subprocess.run(build_cmd(f, tmp, info, args.crf, args.preset), check=True)
+            subprocess.run(build_cmd(f, tmp, info, args.crf, args.preset, args.max_height), check=True)
             os.replace(tmp, dst)
             print(f"         done in {time.time() - t0:.0f}s, {human(os.path.getsize(f))} -> {human(os.path.getsize(dst))}")
         except (subprocess.CalledProcessError, KeyboardInterrupt) as e:
