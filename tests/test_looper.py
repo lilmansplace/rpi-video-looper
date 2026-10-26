@@ -122,6 +122,7 @@ class ControllerTests(unittest.TestCase):
         cfg.data["media"]["device"] = ""
         cfg.data["playback"]["shuffle"] = False
         cfg.data["snapshot"]["interval"] = 1
+        cfg.data["snapshot"]["method"] = "player"  # fake mpv; real files use ffmpeg
         cfg.data["status"]["position_interval"] = 2
         fake = os.path.join(ROOT, "tests", "fake_mpv.py")
         if not hasattr(controller.MpvPlayer, "_orig_args"):

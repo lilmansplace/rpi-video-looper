@@ -54,7 +54,7 @@ extra_args = []
 interval = 30                   # seconds between snapshots (0 = off)
 width = 480
 quality = 70
-ffmpeg_fallback = false         # costs CPU; only enable if snapshots stay blank
+method = "auto"                 # "file" (ffmpeg, background) | "player" (mpv) | "auto"
 
 [status]
 position_interval = 10          # how often the playback position is published

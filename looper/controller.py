@@ -290,16 +290,37 @@ class Controller:
             self._set(status="error")
             return False
 
-    def _take_snapshot(self) -> None:
-        if self.state["status"] != "playing" or not self.state["file"]:
-            return
-        raw = os.path.join(RUN_DIR, "raw.jpg")
+    def _snapshot_method(self) -> str:
         sc = self.cfg.section("snapshot")
-        ok = self.player.screenshot(raw) and snapshot.shrink(raw, self.snapshot_path, sc["width"], sc["quality"])
-        if not ok and sc.get("ffmpeg_fallback") and shutil.which("ffmpeg") and self.playlist.current:
-            ok = snapshot.ffmpeg_grab(self.playlist.current, self.state["position"], self.snapshot_path, sc["width"])
-        if ok:
-            self._set("snapshot", snapshot_time=int(time.time()))
+        m = str(sc.get("method", "auto")).lower()
+        if m in ("file", "player"):
+            return m
+        hw = str(self.cfg.section("player").get("hwdec", "")).lower()
+        zero_copy = hw not in ("", "no") and not hw.endswith("-copy") and hw != "auto-safe"
+        return "file" if zero_copy else "player"
+
+    def _take_snapshot(self) -> None:
+        if self.state["status"] != "playing" or not self.state["file"] or self.overlay:
+            return
+        sc = self.cfg.section("snapshot")
+        if self._snapshot_method() == "player":
+            raw = os.path.join(RUN_DIR, "raw.jpg")
+            if self.player.screenshot(raw) and snapshot.shrink(raw, self.snapshot_path, sc["width"], sc["quality"]):
+                self._set("snapshot", snapshot_time=int(time.time()))
+            return
+        # file method: run off the main thread so controls never wait on ffmpeg
+        if getattr(self, "_snap_thread", None) and self._snap_thread.is_alive():
+            return
+        if not shutil.which("ffmpeg") or not self.playlist.current:
+            return
+        video, pos = self.playlist.current, float(self.player.get("time-pos", self.state["position"]) or 0)
+
+        def work():
+            if snapshot.ffmpeg_grab(video, pos, self.snapshot_path, sc["width"]):
+                self._set("snapshot", snapshot_time=int(time.time()))
+
+        self._snap_thread = threading.Thread(target=work, name="snapshot", daemon=True)
+        self._snap_thread.start()
 
     def _update_position(self) -> None:
         if self.state["status"] not in ("playing",):

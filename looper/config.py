@@ -62,7 +62,11 @@ DEFAULTS: dict = {
         "interval": 30,  # seconds; 0 = off
         "width": 480,
         "quality": 70,
-        "ffmpeg_fallback": False,  # costs CPU; only if mpv screenshots fail
+        # "file": ffmpeg decodes one keyframe from the video file in the background
+        #         (never touches the display). "player": ask mpv (froze the HDMI output
+        #         on a Pi Zero W with zero-copy decoding). "auto": "file" when the
+        #         player uses zero-copy hwdec, else "player".
+        "method": "auto",
     },
     "status": {
         "position_interval": 10,  # how often position is published (seconds)

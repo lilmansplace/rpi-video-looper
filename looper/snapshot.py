@@ -45,18 +45,25 @@ def shrink(src: str, dst: str, width: int, quality: int) -> bool:
 
 
 def ffmpeg_grab(video: str, position: float, dst: str, width: int) -> bool:
-    """Fallback: decode one frame with ffmpeg at the lowest priority."""
+    """Decode one keyframe near `position` straight from the file, at the lowest priority.
+
+    -ss before -i seeks to the nearest keyframe and -skip_frame nokey decodes only that
+    one frame, so this is a short burst of CPU and never touches the display.
+    """
     tmp = dst + ".ff.jpg"
-    cmd = [
-        "nice", "-n", "19", "ionice", "-c", "3",
-        "ffmpeg", "-nostdin", "-loglevel", "error", "-y",
-        "-ss", f"{max(0.0, position):.1f}", "-i", video,
-        "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "6", tmp,
-    ]
-    try:
-        subprocess.run(cmd, timeout=20, check=True)
-        os.replace(tmp, dst)
-        return True
-    except Exception as e:
-        log.warning("ffmpeg snapshot failed: %s", e)
-        return False
+    for pos in dict.fromkeys((max(0.0, position), 0.0)):  # retry from the start if no keyframe found
+        cmd = [
+            "nice", "-n", "19", "ionice", "-c", "3",
+            "ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-threads", "1",
+            "-skip_frame", "nokey", "-noaccurate_seek", "-ss", f"{pos:.1f}", "-i", video,
+            "-an", "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "6", tmp,
+        ]
+        try:
+            subprocess.run(cmd, timeout=20, check=True)
+            if os.path.exists(tmp):
+                os.replace(tmp, dst)
+                return True
+        except Exception as e:
+            log.warning("ffmpeg snapshot failed: %s", e)
+            return False
+    return False
