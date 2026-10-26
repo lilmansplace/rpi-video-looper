@@ -83,7 +83,7 @@ echo "==> Setup hotspot: send every web address to the setup page (captive porta
 mkdir -p /etc/NetworkManager/dnsmasq-shared.d
 install -m 644 "$APP/system/captive-dns.conf" /etc/NetworkManager/dnsmasq-shared.d/looper-captive.conf
 
-echo "==> Hardware watchdog: reboot automatically if the whole Pi locks up"
+echo "==> Hardware watchdog settings (off by default, see system/watchdog.conf)"
 mkdir -p /etc/systemd/system.conf.d
 install -m 644 "$APP/system/watchdog.conf" /etc/systemd/system.conf.d/looper-watchdog.conf
 
