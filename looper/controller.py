@@ -38,6 +38,24 @@ NAV_CMDS = {"next", "previous", "restart", "jump", "toggle_pause", "play", "paus
 ANNOUNCE_SECS = 30
 
 
+_cpu_prev: list = []
+
+
+def cpu_busy() -> float:
+    """CPU use (0-100) since the previous call. Unlike load average, this isn't inflated
+    by GStreamer's many mostly-waiting threads (load ~3.5 while the CPU was ~50% busy)."""
+    try:
+        with open("/proc/stat") as f:
+            v = list(map(int, f.readline().split()[1:]))
+    except OSError:
+        return 0.0
+    total, idle = sum(v), v[3] + v[4]
+    prev = _cpu_prev[:] if _cpu_prev else [total, idle]
+    _cpu_prev[:] = [total, idle]
+    dt = total - prev[0]
+    return 0.0 if dt <= 0 else 100.0 * (1 - (idle - prev[1]) / dt)
+
+
 def local_ip() -> str | None:
     """Our LAN address (no packets are sent)."""
     try:
@@ -325,7 +343,7 @@ class Controller:
             return
         if not shutil.which("ffmpeg") or not self.playlist.current:
             return
-        if os.getloadavg()[0] > 2.0:  # Pi is busy: a snapshot can wait, playback can't
+        if cpu_busy() > 85:  # Pi is busy: a snapshot can wait, playback can't
             return
         video, pos = self.playlist.current, float(self.player.get("time-pos", self.state["position"]) or 0)
 

@@ -158,6 +158,7 @@ class GstPlayer:
             t = msg.type
             if t == Gst.MessageType.ASYNC_DONE and not loaded:
                 loaded = True
+                self._read_negotiated_caps(pipeline)
                 self.on_event({"event": "file-loaded"})
             elif t == Gst.MessageType.EOS:
                 if not self._info.get("image"):
@@ -168,6 +169,30 @@ class GstPlayer:
                 log.error("GStreamer: %s (%s)", err.message, (dbg or "").split("\n")[0])
                 self.on_event({"event": "end-file", "reason": "error", "file_error": err.message})
                 return
+
+    def _read_negotiated_caps(self, pipeline) -> None:
+        """Fill in width/height/fps from the decoded video caps (parsebin doesn't always know)."""
+        it = pipeline.iterate_recurse()
+        while True:
+            res, el = it.next()
+            if res != Gst.IteratorResult.OK:
+                break
+            f = el.get_factory()
+            if not f or not f.list_is_type(Gst.ELEMENT_FACTORY_TYPE_SINK | Gst.ELEMENT_FACTORY_TYPE_MEDIA_VIDEO):
+                continue
+            pad = el.get_static_pad("sink")
+            caps = pad.get_current_caps() if pad else None
+            if not caps or caps.get_size() == 0:
+                continue
+            st = caps.get_structure(0)
+            ok_w, w = st.get_int("width")
+            ok_h, h = st.get_int("height")
+            ok_f, num, den = st.get_fraction("framerate")
+            if ok_w and ok_h:
+                self._info.update(width=w, height=h)
+            if ok_f and den and num:
+                self._info["fps"] = num / den
+            return
 
     # ---------- interface used by the controller ----------
     def play(self, path: str) -> None:
