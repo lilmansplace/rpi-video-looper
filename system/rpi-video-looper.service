@@ -1,7 +1,8 @@
 [Unit]
 Description=rpi-video-looper
-# Start as soon as local disks are up. We deliberately do NOT wait for the
-# network: video should be on screen before Wi-Fi has even associated.
+# Started by rpi-video-looper.timer shortly after boot, not during it: on a Pi Zero W,
+# starting the player in the middle of boot hung the whole Pi (tested on hardware),
+# while starting it once boot settles works every time.
 After=local-fs.target systemd-udevd.service
 StartLimitIntervalSec=0
 
@@ -31,5 +32,4 @@ TimeoutStartSec=60
 MemoryHigh=300M
 MemoryMax=380M
 
-[Install]
-WantedBy=multi-user.target
+# No [Install] section: enable rpi-video-looper.timer instead.

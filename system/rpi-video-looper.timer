@@ -1,0 +1,12 @@
+[Unit]
+Description=Start rpi-video-looper once boot has settled
+
+[Timer]
+# Measured from kernel start. A Pi Zero W reaches this point well after the
+# console/graphics/Wi-Fi setup that conflicted with starting the player during boot.
+OnBootSec=20
+AccuracySec=1s
+Unit=rpi-video-looper.service
+
+[Install]
+WantedBy=timers.target

@@ -75,9 +75,13 @@ echo "/dev/sda1 /media/usb auto ro,nofail,noatime,x-systemd.automount,x-systemd.
 
 echo "==> Installing services"
 install -m 644 "$APP/system/rpi-video-looper.service" /etc/systemd/system/
+install -m 644 "$APP/system/rpi-video-looper.timer" /etc/systemd/system/
 install -m 644 "$APP/system/looper-net.service" /etc/systemd/system/
 sysd daemon-reload
-for unit in rpi-video-looper.service looper-net.service NetworkManager.service avahi-daemon.service; do
+# v0.1-v0.3 enabled the service directly (started mid-boot); now a timer starts it after boot
+rm -f /etc/systemd/system/multi-user.target.wants/rpi-video-looper.service
+mkdir -p /var/log/journal
+for unit in rpi-video-looper.timer looper-net.service NetworkManager.service avahi-daemon.service; do
   sysd enable "$unit" >/dev/null 2>&1 || echo "    note: couldn't enable $unit (masked?)"
 done
 
@@ -89,7 +93,7 @@ echo "==> Hardware watchdog settings (off by default, see system/watchdog.conf)"
 mkdir -p /etc/systemd/system.conf.d
 install -m 644 "$APP/system/watchdog.conf" /etc/systemd/system.conf.d/looper-watchdog.conf
 
-echo "==> Logs in RAM (no SD card wear, faster)"
+echo "==> Logs: kept across reboots, capped at 16 MB"
 mkdir -p /etc/systemd/journald.conf.d
 install -m 644 "$APP/system/journald.conf" /etc/systemd/journald.conf.d/looper.conf
 
