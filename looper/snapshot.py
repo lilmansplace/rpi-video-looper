@@ -59,7 +59,7 @@ def ffmpeg_grab(video: str, position: float, dst: str, width: int) -> bool:
             "-an", "-frames:v", "1", "-vf", f"scale={width}:-2", "-q:v", "6", tmp,
         ]
         try:
-            subprocess.run(cmd, timeout=20, check=True)
+            subprocess.run(cmd, timeout=45, check=True)
             if os.path.exists(tmp):
                 os.replace(tmp, dst)
                 return True

@@ -45,6 +45,8 @@ DEFAULTS: dict = {
         # Skip files the looper has found won't play smoothly on this Pi
         # (wrong codec, 4K, 60 fps...). Off = play them anyway, but still warn.
         "skip_incompatible": False,
+        # Wait (up to this many seconds) for boot work to finish before starting video.
+        "boot_settle_max": 300,
     },
     "player": {
         # Measured on a Pi Zero W (tools/bench.py): zero-copy hardware decode + mpv's

@@ -15,3 +15,4 @@ os.environ.setdefault("LOOPER_STATE_DIR", os.path.join(TMP, "state"))
 os.environ.setdefault("LOOPER_CONFIG", os.path.join(TMP, "looper.toml"))
 os.environ.setdefault("LOOPER_NET_RUN_DIR", os.path.join(TMP, "net"))
 os.environ.setdefault("LOOPER_NET_STATE", os.path.join(TMP, "net", "state.json"))
+os.environ.setdefault("LOOPER_BOOT_SETTLE", "0")  # no boot wait off-device

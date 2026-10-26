@@ -13,6 +13,7 @@ import os
 import queue
 import shutil
 import socket
+import subprocess
 import threading
 import time
 
@@ -313,6 +314,8 @@ class Controller:
             return
         if not shutil.which("ffmpeg") or not self.playlist.current:
             return
+        if os.getloadavg()[0] > 2.0:  # Pi is busy: a snapshot can wait, playback can't
+            return
         video, pos = self.playlist.current, float(self.player.get("time-pos", self.state["position"]) or 0)
 
         def work():
@@ -490,7 +493,37 @@ class Controller:
                     self._play(pl.current or pl.next())
 
     # ---------- main loop ----------
+    def _wait_for_boot(self) -> None:
+        """Hold the video until boot work (cloud-init, network setup, ...) has finished.
+
+        On a single-core Pi Zero W, starting playback while boot is still busy starved
+        everything (screen, SSH, Wi-Fi) for minutes. Wait until systemd says boot is done
+        and the load has calmed down, up to playback.boot_settle_max seconds.
+        """
+        max_wait = int(os.environ.get("LOOPER_BOOT_SETTLE",
+                                      self.cfg.section("playback").get("boot_settle_max", 300)) or 0)
+        if max_wait <= 0:
+            return
+        sdnotify.notify("READY=1")  # web UI is up; don't hold up the boot itself
+        self._set(status="starting")
+        deadline, calm = time.monotonic() + max_wait, 0
+        while self._running and time.monotonic() < deadline:
+            try:
+                st = subprocess.run(["systemctl", "is-system-running"], capture_output=True,
+                                    text=True, timeout=10).stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                st = "unknown"
+            load = os.getloadavg()[0]
+            calm = calm + 1 if st not in ("initializing", "starting") and load < 1.5 else 0
+            if calm >= 3:
+                log.info("boot settled (system %s, load %.2f)", st, load)
+                return
+            sdnotify.notify("WATCHDOG=1")
+            time.sleep(2)
+        log.info("starting playback anyway after %ss", max_wait)
+
     def run(self) -> None:
+        self._wait_for_boot()
         self._start_player()
         self._rescan(initial=True)
         sdnotify.notify("READY=1")
