@@ -51,6 +51,7 @@ class MpvPlayer:
             "--no-input-default-bindings",
             "--input-vo-keyboard=no",
             "--keep-open=no",
+            "--image-display-duration=inf",  # setup/info screens stay up until replaced
             "--force-window=yes",  # black screen between files instead of console
             "--background-color=#000000",
             "--cursor-autohide=always",

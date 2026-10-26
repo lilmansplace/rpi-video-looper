@@ -8,7 +8,9 @@ A lightweight, fast-booting video looper for the **Raspberry Pi Zero W**, inspir
 - **Tunable settings** (shuffle, repeat, volume, snapshot rate, …) from the web UI or Home Assistant
 - **Controls:** next, previous, restart, play/pause, jump to any video
 - **Snapshots** of what's on screen, shown in the web UI and as a Home Assistant camera
-- **Home Assistant over MQTT** with auto-discovery: no custom integration to install
+- **Home Assistant over MQTT** with auto-discovery: no custom integration to install, and the
+  looper finds your broker by itself
+- **Flash-and-boot setup:** with no network, the projector shows a QR code for a setup hotspot
 - **Fast boot** and **self-healing** (service watchdog + hardware watchdog)
 
 ## How it stays light on a Pi Zero W
@@ -63,33 +65,77 @@ Don't convert on the Pi itself: a Zero would take hours per video.
 
 ## Install
 
-1. **Flash** with Raspberry Pi Imager: *Raspberry Pi Zero* → *Raspberry Pi OS (other)* →
-   **Raspberry Pi OS Lite (32-bit)**. In the customisation screen set the hostname
-   (e.g. `looper`), your Wi-Fi (2.4 GHz), a user, and enable SSH.
-2. Boot the Pi, then SSH in: `ssh <user>@looper.local`
-3. Install (takes a few minutes on a Zero):
+### Option A: ready-made image (easiest)
+
+1. Download `rpi-video-looper-*.img.xz` from [Releases](https://github.com/lilmansplace/rpi-video-looper/releases).
+2. Flash it with Raspberry Pi Imager (*Choose OS → Use custom*) or balenaEtcher. You can skip
+   Imager's customisation; if you do fill it in (Wi-Fi, hostname), it's used.
+3. Put the card in the Pi Zero W, plug in the projector and the thumb drive, and power on.
+4. Follow the projector (see [Getting online](#getting-online)).
+
+The image is Raspberry Pi OS Lite (32-bit) with the looper pre-installed and boot tweaks applied.
+SSH is **off** until you set a password (setup page, or `[ssh]` in `looper.toml`); the user is `looper`.
+
+### Option B: install on Raspberry Pi OS yourself
+
+1. Flash **Raspberry Pi OS Lite (32-bit)** with Raspberry Pi Imager (*Raspberry Pi Zero* →
+   *Raspberry Pi OS (other)*). Set the hostname, Wi-Fi (2.4 GHz), a user and SSH in its customisation screen.
+2. SSH in and run (takes 5 to 10 minutes on a Zero):
    ```bash
    sudo apt-get install -y git
    git clone https://github.com/lilmansplace/rpi-video-looper.git
    cd rpi-video-looper && sudo bash install.sh
+   sudo reboot
    ```
-4. Optional: edit `/boot/firmware/looper.toml` to turn on MQTT (see below).
-5. `sudo reboot`. Videos on the USB drive start playing; the UI is at `http://looper.local:8080/`.
+
+**Updating** either one: `cd rpi-video-looper && git pull && sudo bash install.sh`
+(on the image: `sudo bash /opt/rpi-video-looper/install.sh` after `sudo git -C /opt/rpi-video-looper pull`).
+
+## Getting online
+
+A looper gets onto your network in whichever of these ways you like:
+
+1. **The projector walks you through it.** If the looper has no network about a minute after
+   booting, the projector shows a QR code. Scan it with your phone's camera to join the
+   *Looper-Setup-XXXX* hotspot, and the setup page opens by itself (like hotel Wi-Fi). Pick your
+   network, type the password, optionally name the looper and add a Home Assistant login, and tap
+   **Connect**. The projector then shows the looper's address and a QR code for the controls.
+   The hotspot is WPA2-protected; its password is on the projector screen and inside the QR code.
+2. **A file next to your videos.** Put a `looper.toml` on the thumb drive:
+   ```toml
+   [wifi]
+   ssid = "MyNetwork"
+   password = "my wifi password"
+   country = "US"
+
+   [device]
+   name = "Porch Looper"
+   ```
+   Handy for setting up several loopers, or moving one to a new house.
+3. **The SD card.** The same `[wifi]` section in `looper.toml` on the card's boot partition
+   (it shows up as a drive on any computer). The password is removed from that file once saved.
+4. **Raspberry Pi Imager's settings**, as usual.
+
+If a working network disappears, the looper keeps trying it; after 5 minutes without it, the setup
+hotspot comes back (and it keeps retrying the saved network every few minutes while nobody is using
+the hotspot).
 
 ## Home Assistant
 
-In `/boot/firmware/looper.toml`:
+You need the MQTT integration with a broker (normally the **Mosquitto broker** add-on).
+The looper finds it by itself: it looks for Home Assistant on the network (mDNS) and tries
+`homeassistant.local`. Mosquitto usually requires a login, so the web UI's **Home Assistant**
+card will say *login needed*. Enter a Home Assistant user (or a Mosquitto add-on login) there,
+on the setup page, or in `looper.toml`:
 
 ```toml
 [mqtt]
-enabled = true
-host = "192.168.1.10"   # your HA / Mosquitto address
 username = "looper"
 password = "…"
+host = "192.168.1.10"   # optional: skip the search and use this broker only (also set enabled = true)
 ```
 
-Restart (`sudo systemctl restart rpi-video-looper`). A **Video Looper** device appears
-under *Settings → Devices → MQTT* with:
+A device named after the looper appears under *Settings → Devices → MQTT* with:
 
 | Entity | Type |
 |---|---|
@@ -122,12 +168,14 @@ Raw MQTT topics are documented in [`looper/mqtt_ha.py`](looper/mqtt_ha.py).
 GET  /api/state              GET /api/library           GET /snapshot.jpg
 POST /api/cmd       {"cmd": "next"}   {"cmd": "jump", "arg": 3}   {"cmd": "seek", "arg": 30}
 POST /api/settings  {"volume": 80, "shuffle": false, "repeat": "one"}
+POST /api/mqtt      {"host": "", "username": "ha", "password": "…"}     ("" host = find automatically)
 ```
 
 ## Tuning & troubleshooting
 
 ```bash
 journalctl -u rpi-video-looper -f            # live log
+journalctl -u looper-net -f                  # Wi-Fi / setup hotspot log
 systemd-analyze blame                        # what's slowing boot
 sudo systemctl stop rpi-video-looper
 python3 /opt/rpi-video-looper/tools/bench.py /media/usb/clip.mp4   # find the smoothest player settings
@@ -144,12 +192,20 @@ python3 /opt/rpi-video-looper/tools/bench.py /media/usb/clip.mp4   # find the sm
 Runs off-device with a fake mpv:
 
 ```bash
-python3 -m unittest tests.test_looper -v
+pip install paho-mqtt pillow qrcode
+python3 -m unittest discover -s tests -v
 ```
+
+Images are built by GitHub Actions (`.github/workflows/build-image.yml`) when a `v*` tag is
+pushed, using `tools/build-image.sh` (Raspberry Pi OS Lite + `install.sh` in a qemu chroot).
+Each release also has an `os-list.json` for Raspberry Pi Imager's custom repository option.
 
 ## Roadmap
 
 - [x] Format check, warnings and auto-skip; PC conversion tool
+- [x] Flash-and-boot image, setup hotspot with QR code, MQTT auto-discovery
+- [ ] Test the image and setup hotspot on real hardware
+- [ ] Bluetooth (Improv) Wi-Fi setup from Home Assistant
 - [ ] Verify the default `[player]` settings on real hardware (`tools/bench.py`)
 - [ ] Optional read-only root (overlayfs) for pull-the-plug safety
 - [ ] Measure and trim boot time further

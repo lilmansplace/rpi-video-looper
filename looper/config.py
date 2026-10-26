@@ -1,9 +1,13 @@
 """Configuration loading.
 
-Three layers, later wins:
+Layers, later wins:
   1. DEFAULTS below
-  2. /boot/firmware/looper.toml  (editable from any PC by pulling the SD card)
-  3. /var/lib/looper/settings.json (runtime changes made from the web UI / Home Assistant)
+  2. /boot/firmware/looper.toml   (editable from any PC by pulling the SD card)
+  3. /var/lib/looper/setup.json   (written by the setup hotspot and the web UI's MQTT form)
+  4. <thumb drive>/looper.toml    (drop one next to your videos to configure a looper)
+  5. /var/lib/looper/settings.json (playback tweaks made from the web UI / Home Assistant)
+
+[wifi] and [ssh] are handled by the network setup service (looper/netsetup.py).
 
 Only keys listed in TUNABLES can be changed at runtime.
 """
@@ -60,15 +64,20 @@ DEFAULTS: dict = {
     "status": {
         "position_interval": 10,  # how often position is published (seconds)
     },
+    "device": {
+        "name": "Video Looper",  # shown in Home Assistant; also sets the hostname
+    },
     "mqtt": {
-        "enabled": False,
+        # "auto" = look for Home Assistant / an MQTT broker on the network and
+        # connect if it allows it; true = use host below; false = off.
+        "enabled": "auto",
         "host": "homeassistant.local",
         "port": 1883,
         "username": "",
         "password": "",
         "discovery_prefix": "homeassistant",
-        "node_id": "rpi_looper",
-        "name": "Video Looper",
+        "node_id": "",  # default: derived from the device name
+        "name": "",  # default: the device name
     },
     "web": {
         "enabled": True,
@@ -119,22 +128,87 @@ def coerce(key: str, value):
     return value
 
 
+def read_toml(path: str) -> dict:
+    """Load a TOML file; a broken or missing file is logged and treated as empty."""
+    try:
+        with open(path, "rb") as f:
+            return tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:  # bad TOML must never stop playback
+        log.error("ignoring %s: %s", path, e)
+        return {}
+
+
+def usb_config_path(media: dict) -> str | None:
+    """looper.toml on the thumb drive, only if the drive is actually present."""
+    dev = media.get("device")
+    if dev and not os.path.exists(dev):
+        return None
+    path = os.path.join(media.get("dir", "/media/usb"), "looper.toml")
+    try:
+        return path if os.path.isfile(path) else None
+    except OSError:
+        return None
+
+
+def slug(name: str) -> str:
+    out = "".join(c if c.isalnum() else "_" for c in name.lower()).strip("_")
+    while "__" in out:
+        out = out.replace("__", "_")
+    return out or "looper"
+
+
+def save_setup(state_dir: str, section: str, values: dict) -> None:
+    """Merge values into setup.json (used by the setup portal and web UI)."""
+    path = os.path.join(state_dir, "setup.json")
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault(section, {}).update(values)
+    os.makedirs(state_dir, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=state_dir, prefix=".setup")
+    with os.fdopen(fd, "w") as f:
+        json.dump(data, f, indent=2)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o640)
+    try:  # written by root (setup portal) but read by the looper user
+        st = os.stat(state_dir)
+        os.chown(tmp, st.st_uid, st.st_gid)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+
+
 class Config:
     def __init__(self, boot_path: str = BOOT_CONFIG, state_dir: str = STATE_DIR):
         self.boot_path = boot_path
         self.settings_path = os.path.join(state_dir, "settings.json")
+        self.setup_path = os.path.join(state_dir, "setup.json")
         self.state_dir = state_dir
         self.data = copy.deepcopy(DEFAULTS)
         self.overrides: dict = {}
         self.load()
 
     def load(self) -> None:
-        if os.path.exists(self.boot_path):
-            try:
-                with open(self.boot_path, "rb") as f:
-                    _merge(self.data, tomllib.load(f))
-            except Exception as e:  # bad TOML must never stop playback
-                log.error("ignoring %s: %s", self.boot_path, e)
+        _merge(self.data, read_toml(self.boot_path))
+        try:
+            with open(self.setup_path) as f:
+                _merge(self.data, json.load(f))
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            log.error("ignoring %s: %s", self.setup_path, e)
+        usb = usb_config_path(self.data["media"])
+        if usb:
+            log.info("using settings from %s", usb)
+            _merge(self.data, read_toml(usb))
+        m, name = self.data["mqtt"], self.data["device"].get("name") or "Video Looper"
+        m["name"] = m.get("name") or name
+        m["node_id"] = m.get("node_id") or slug(name)
         if os.path.exists(self.settings_path):
             try:
                 with open(self.settings_path) as f:

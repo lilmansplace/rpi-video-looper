@@ -1,0 +1,54 @@
+name: Build image
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xz-utils parted e2fsprogs dosfstools util-linux
+
+      - name: ARM emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Tests
+        run: |
+          pip install --quiet paho-mqtt pillow qrcode
+          python3 -m unittest discover -s tests -v
+
+      - name: Build
+        run: sudo -E tools/build-image.sh
+
+      - name: Upload image (workflow artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpi-video-looper-image
+          path: out/*
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.img.xz
+            out/os-list.json
+          body: |
+            Flash `rpi-video-looper-*.img.xz` with Raspberry Pi Imager (**Use custom**) or balenaEtcher,
+            put the card in a Pi Zero W, connect the projector, and power on. The projector walks you
+            through Wi-Fi setup with a QR code. See the README for details.

@@ -1,8 +1,27 @@
 # rpi-video-looper settings
 # This file lives on the SD card's boot partition (/boot/firmware/looper.toml),
-# so you can edit it from any computer. Changes made in the web UI or Home
-# Assistant are saved separately in /var/lib/looper/settings.json and win over
-# the values below. Restart the looper (or reboot) after editing.
+# so you can edit it from any computer. You can also put a looper.toml next to
+# your videos on the thumb drive: settings there win over this file.
+# Changes made in the web UI or Home Assistant are saved on the Pi and win over
+# playback settings below. Restart the looper (or reboot) after editing.
+
+# ---- Getting online -------------------------------------------------------
+# Easiest: just boot it. With no network, the projector shows a QR code for a
+# setup hotspot. Or fill this in and the looper joins on boot (the password is
+# removed from this file once it's saved on the Pi).
+[wifi]
+ssid = ""
+password = ""
+country = "US"                  # two-letter code; needed for Wi-Fi to work
+hidden = false
+
+[device]
+name = "Video Looper"           # shown in Home Assistant and used as the hostname
+
+# Remote login for user "looper". Off unless you set a password here.
+# [ssh]
+# enabled = true
+# password = "choose-something"
 
 [media]
 dir = "/media/usb"              # the thumb drive is mounted here automatically
@@ -38,14 +57,16 @@ ffmpeg_fallback = false         # costs CPU; only enable if snapshots stay blank
 position_interval = 10          # how often the playback position is published
 
 [mqtt]
-enabled = false
+# "auto" = find Home Assistant / Mosquitto on the network by itself.
+# true = use host below only. false = off.
+enabled = "auto"
 host = "homeassistant.local"
 port = 1883
 username = ""
 password = ""
 discovery_prefix = "homeassistant"
-node_id = "rpi_looper"          # change if you run more than one looper
-name = "Video Looper"
+node_id = ""                    # default: from [device] name
+name = ""                       # default: [device] name
 
 [web]
 enabled = true

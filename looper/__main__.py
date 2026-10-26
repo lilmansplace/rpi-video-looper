@@ -20,6 +20,7 @@ def main() -> int:
     log = logging.getLogger("looper")
     cfg = Config()
     ctl = Controller(cfg)
+    ctl.mqtt_manager = None
 
     if cfg.section("web")["enabled"]:
         try:
@@ -29,13 +30,13 @@ def main() -> int:
             log.exception("web UI failed to start (playback continues)")
 
     mq = None
-    if cfg.section("mqtt")["enabled"]:
-        try:
-            from .mqtt_ha import HomeAssistantMQTT
-            mq = HomeAssistantMQTT(cfg.section("mqtt"), ctl)
-            mq.start()
-        except Exception:
-            log.exception("MQTT failed to start (playback continues)")
+    try:
+        from .mqtt_auto import MqttManager
+        mq = MqttManager(cfg, ctl)
+        ctl.mqtt_manager = mq
+        mq.start()
+    except Exception:
+        log.exception("MQTT failed to start (playback continues)")
 
     def stop(*_):
         ctl.shutdown()

@@ -37,14 +37,15 @@ done
 echo "$line" | tr -s ' ' | sed 's/^ //' > "$CMD"
 
 echo "==> Disabling services the looper doesn't need"
-for unit in bluetooth.service hciuart.service ModemManager.service triggerhappy.service \
+for unit in bluetooth.service hciuart.service ModemManager.service triggerhappy.service userconfig.service \
             triggerhappy.socket NetworkManager-wait-online.service systemd-networkd-wait-online.service \
             apt-daily.timer apt-daily-upgrade.timer man-db.timer e2scrub_all.timer \
             keyboard-setup.service rpi-eeprom-update.service cups.service; do
-  systemctl disable --now "$unit" >/dev/null 2>&1 || true
+  systemctl disable --now "$unit" >/dev/null 2>&1 || systemctl disable "$unit" >/dev/null 2>&1 || true
 done
-# cloud-init only matters on first boot (Raspberry Pi Imager settings)
-if [ -d /etc/cloud ] && [ ! -f /etc/cloud/cloud-init.disabled ]; then
+# cloud-init only matters on first boot (Raspberry Pi Imager settings). A ready-made image
+# keeps it for that first boot; looper-net turns it off once the Pi is online.
+if [ "${LOOPER_IMAGE_BUILD:-0}" != 1 ] && [ -d /etc/cloud ] && [ ! -f /etc/cloud/cloud-init.disabled ]; then
   touch /etc/cloud/cloud-init.disabled
 fi
 

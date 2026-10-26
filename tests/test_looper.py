@@ -10,13 +10,8 @@ import time
 import unittest
 import urllib.request
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
-
-TMP = tempfile.mkdtemp()
-os.environ["LOOPER_RUN_DIR"] = os.path.join(TMP, "run")
-os.environ["LOOPER_STATE_DIR"] = os.path.join(TMP, "state")
-os.environ["LOOPER_CONFIG"] = os.path.join(TMP, "looper.toml")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _env import ROOT, TMP  # noqa: E402  (sets LOOPER_* paths before looper is imported)
 
 from looper import config as config_mod  # noqa: E402
 from looper.playlist import Playlist  # noqa: E402

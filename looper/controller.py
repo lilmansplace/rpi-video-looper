@@ -12,10 +12,11 @@ import logging
 import os
 import queue
 import shutil
+import socket
 import threading
 import time
 
-from . import __version__, compat, sdnotify, snapshot
+from . import __version__, compat, screens, sdnotify, snapshot
 from .config import RUN_DIR, Config
 from .player import MpvPlayer, PlayerError
 from .playlist import Playlist, scan, title_of
@@ -29,6 +30,22 @@ def _read(path: str, default: str = "") -> str:
             return f.read().strip()
     except OSError:
         return default
+
+
+NET_STATE = os.environ.get("LOOPER_NET_STATE", "/run/looper-net/state.json")
+NAV_CMDS = {"next", "previous", "restart", "jump", "toggle_pause", "play", "pause", "seek", "stop"}
+ANNOUNCE_SECS = 30
+
+
+def local_ip() -> str | None:
+    """Our LAN address (no packets are sent)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("192.0.2.1", 9))
+            ip = s.getsockname()[0]
+            return None if ip.startswith("127.") else ip
+    except OSError:
+        return None
 
 
 def system_stats() -> dict:
@@ -71,6 +88,8 @@ class Controller:
             "video": None,  # e.g. "h264 1920x1080 30fps (hw)"
             "warnings": [],  # [{"title", "reasons"}] for files in the library
             "warning_count": 0,
+            "network": None,  # {"mode", "ip", "network"} from the setup service
+            "mqtt": "starting",
             "version": __version__,
         }
         self.state.update(cfg.tunables())
@@ -81,6 +100,9 @@ class Controller:
         self.compat_path = os.path.join(cfg.state_dir, "compat.json")
         self.compat_db: dict = self._load_compat()
         self._check_due: float | None = None
+        self.overlay: str | None = None  # key of the info screen being shown instead of video
+        self.net: dict = {}
+        self._net_mtime = None
 
     # ---------- public API (thread-safe) ----------
     def submit(self, cmd: str, arg=None) -> None:
@@ -209,6 +231,7 @@ class Controller:
                 if not path or not self.known_bad(path):
                     break
         self._check_due = None
+        self.overlay = None
         if not path:
             try:
                 self.player.stop_playback()
@@ -285,8 +308,76 @@ class Controller:
         if pos is not None:
             self._set(position=int(pos))
 
+    # ---------- projector info screens ----------
+    def _read_net(self) -> None:
+        try:
+            mt = os.stat(NET_STATE).st_mtime
+        except OSError:
+            mt = None
+        if mt != self._net_mtime:
+            self._net_mtime = mt
+            try:
+                with open(NET_STATE) as f:
+                    self.net = json.load(f)
+            except (OSError, ValueError):
+                self.net = {}
+            self._set(network={k: self.net.get(k) for k in ("mode", "ip", "network")})
+
+    def _wanted_overlay(self) -> tuple[str, dict] | tuple[None, None]:
+        n = self.net
+        mode = n.get("mode")
+        if mode == "setup":
+            return f"setup:{n.get('t')}", n
+        if mode == "connecting":
+            return f"connecting:{n.get('network')}", n
+        port = self.cfg.section("web")["port"]
+        ip = n.get("ip") if mode == "online" else None
+        if mode == "online" and n.get("announce") and time.time() - n.get("t", 0) < ANNOUNCE_SECS:
+            return f"online:{n.get('t')}", {**n, "web_port": port, "mqtt": self._mqtt_line()}
+        if self.state["status"] == "no_media":
+            ip = ip or local_ip()
+            if ip:
+                return f"nomedia:{ip}", {"mode": "online", "ip": ip, "network": n.get("network"),
+                                          "web_port": port, "title": "No videos found",
+                                          "note": "Copy H.264 MP4 videos onto a USB drive and plug it in.",
+                                          "mqtt": self._mqtt_line()}
+        return None, None
+
+    def _mqtt_line(self) -> str | None:
+        m = self.state.get("mqtt") or ""
+        return f"Home Assistant: {m}" if m and m not in ("off", "starting") else None
+
+    def _net_tick(self) -> None:
+        self._read_net()
+        key, st = self._wanted_overlay()
+        if key == self.overlay:
+            return
+        if key is None:
+            # info screen no longer needed: go back to the videos
+            self.overlay = None
+            if self.playlist.files:
+                self._play(self.playlist.current or self.playlist.next())
+            return
+        path = os.path.join(RUN_DIR, "screen.png")
+        if screens.render(st, path):
+            try:
+                self.player.play(path)
+                self.overlay = key
+                kind = key.split(":")[0]
+                status = "setup" if kind in ("setup", "connecting") else "no_media" if kind == "nomedia" else "info"
+                self._set(status=status, title=None, file=None, position=0, duration=0, video=None)
+            except PlayerError as e:
+                log.error("could not show info screen: %s", e)
+
     def _handle(self, cmd: str, arg) -> None:
         pl = self.playlist
+        if self.overlay and cmd in NAV_CMDS:
+            if self.overlay.split(":")[0] in ("setup", "connecting"):
+                log.info("ignoring %s during network setup", cmd)
+                return
+            if cmd in ("toggle_pause", "play", "restart") and pl.files:
+                self._play(pl.current or pl.next())
+                return
         if cmd == "next":
             self._play(pl.next())
         elif cmd == "previous":
@@ -355,8 +446,11 @@ class Controller:
             dur = self.player.get("duration")
             self._set(duration=int(dur or 0))
             # give the decoder a moment so hwdec-current is meaningful
-            self._check_due = time.monotonic() + 2.5
+            if not self.overlay:
+                self._check_due = time.monotonic() + 2.5
         elif cmd == "_ended":
+            if self.overlay:
+                return
             self._play(pl.next(auto=True))
         elif cmd == "_file_error":
             self._errors += 1
@@ -381,7 +475,7 @@ class Controller:
         sdnotify.notify("READY=1")
         wd = sdnotify.watchdog_interval()
         now = time.monotonic()
-        timers = {"rescan": now, "position": now, "snapshot": now + 5, "watchdog": now, "stats": now}
+        timers = {"rescan": now, "position": now, "snapshot": now + 5, "watchdog": now, "stats": now, "net": now}
         while self._running:
             try:
                 cmd, arg = self.q.get(timeout=1.0)
@@ -400,6 +494,12 @@ class Controller:
                     self._check_current()
                 except Exception:
                     log.exception("compatibility check failed")
+            if now >= timers["net"]:
+                try:
+                    self._net_tick()
+                except Exception:
+                    log.exception("info screen update failed")
+                timers["net"] = now + 2
             if wd and now >= timers["watchdog"]:
                 # only pet the watchdog if mpv is healthy (or deliberately idle)
                 if self.player.alive() or self.state["status"] in ("no_media",):

@@ -72,6 +72,18 @@
     <button data-cmd="rescan" style="width:100%;margin-top:6px">Rescan USB now</button>
   </div>
 
+  <div class="card">
+    <label>Home Assistant <span id="mqttstate" class="pill">…</span></label>
+    <div class="meta" id="mqtttext"></div>
+    <form id="mqttform">
+      <label>Server <input name="host" placeholder="automatic" autocomplete="off" style="width:60%"></label>
+      <label>Username <input name="username" autocomplete="off" style="width:60%"></label>
+      <label>Password <input name="password" type="password" placeholder="unchanged" autocomplete="off" style="width:60%"></label>
+      <button type="submit" style="width:100%;margin-top:6px">Save and connect</button>
+    </form>
+    <div class="meta" style="margin-top:6px">Mosquitto usually needs a login: a Home Assistant user or a Mosquitto add-on login works.</div>
+  </div>
+
   <div class="stats" id="stats"></div>
 </main>
 <script>
@@ -92,6 +104,12 @@ document.querySelectorAll('[data-set]').forEach(el => {
     post('/api/settings', {[el.dataset.set]: v});
   };
 });
+$('#mqttform').onsubmit = e => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  post('/api/mqtt', {host: f.get('host'), username: f.get('username'), password: f.get('password')});
+  e.target.password.value = '';
+};
 $('#library').onchange = e => { if (e.target.value !== '') post('/api/cmd', {cmd:'jump', arg: Number(e.target.value)}); };
 
 async function loadLibrary() {
@@ -114,6 +132,11 @@ async function refresh() {
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   });
   $('#vid').textContent = state.video || '';
+  const ms = state.mqtt_state || 'off';
+  $('#mqttstate').textContent = {connected:'connected', needs_login:'login needed', not_found:'not found',
+    searching:'searching', off:'off'}[ms] || ms;
+  $('#mqttstate').className = 'pill ' + (ms === 'connected' ? 'playing' : ms === 'needs_login' ? 'paused' : '');
+  $('#mqtttext').textContent = state.mqtt || '';
   const w = state.warnings || [];
   $('#warnbox').hidden = !w.length;
   $('#warntitle').textContent = `${w.length} video${w.length === 1 ? '' : 's'} won't play smoothly on this Pi`;

@@ -6,6 +6,7 @@ GET  /api/library      list of video titles
 POST /api/cmd          {"cmd": "next" | "previous" | "restart" | "toggle_pause" | "pause" | "play"
                                | "stop" | "rescan" | "jump" | "seek", "arg": ...}
 POST /api/settings     {"volume": 80, "shuffle": false, ...}
+POST /api/mqtt         {"host": "", "port": 1883, "username": "...", "password": "..."}  ("" host = automatic)
 GET  /snapshot.jpg     latest snapshot
 """
 
@@ -17,7 +18,7 @@ import os
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .config import TUNABLES
+from .config import TUNABLES, save_setup
 
 log = logging.getLogger(__name__)
 
@@ -80,6 +81,28 @@ def make_handler(ctl):
                 if cmd not in ALLOWED_CMDS:
                     return self._json({"error": f"unknown cmd {cmd!r}"}, 400)
                 ctl.submit(cmd, data.get("arg"))
+                return self._json({"ok": True})
+            if path == "/api/mqtt":
+                host = str(data.get("host") or "").strip()
+                vals = {
+                    "enabled": True if host else "auto",
+                    "host": host or "homeassistant.local",
+                    "port": int(data.get("port") or 1883),
+                    "username": str(data.get("username") or "").strip(),
+                }
+                if data.get("password") is not None and data.get("password") != "":
+                    vals["password"] = str(data["password"])
+                elif not vals["username"]:
+                    vals["password"] = ""
+                if data.get("enabled") is False:
+                    vals["enabled"] = False
+                try:
+                    save_setup(ctl.cfg.state_dir, "mqtt", vals)
+                except OSError as e:
+                    return self._json({"error": str(e)}, 500)
+                mgr = getattr(ctl, "mqtt_manager", None)
+                if mgr:
+                    mgr.reconfigure()
                 return self._json({"ok": True})
             if path == "/api/settings":
                 bad = [k for k in data if k not in TUNABLES]
