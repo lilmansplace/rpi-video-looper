@@ -183,7 +183,11 @@ python3 /opt/rpi-video-looper/tools/bench.py /media/usb/clip.mp4   # find the sm
 
 - `tools/optimize-boot.sh` (run by the installer) disables the splash, Bluetooth, unused services and
   boot delays. It backs up `config.txt` / `cmdline.txt` first.
-- Set `SKIP_BOOT_TWEAKS=1` before `install.sh` to leave boot settings alone.
+- Boot tweaks are **opt-in** (`sudo BOOT_TWEAKS=1 bash install.sh`) until they're proven on hardware.
+- **Power:** a Pi Zero W fed from a projector's USB port is marginal. Plug the thumb drive in *before*
+  powering on: hot-plugging it can brown out the Pi and reset it. A dedicated 5 V 2.5 A supply is best.
+- Shut down with `sudo poweroff` when you can. Pulling power while the Pi writes to the SD card's
+  boot partition (FAT) can corrupt files like `cmdline.txt`; Windows' `chkdsk X: /f` repairs it.
 - The USB drive is expected as `/dev/sda1`. For a drive without a partition table set
   `device = "/dev/sda"` and edit the `/media/usb` line in `/etc/fstab`.
 

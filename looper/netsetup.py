@@ -39,7 +39,8 @@ AP_CON = "looper-setup"
 AP_ADDR = "10.42.0.1"
 PSK_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # no 0/o/1/l/i: readable off a projector
 
-FIRST_WAIT = 45  # seconds to wait for a saved network at boot before the hotspot
+FIRST_WAIT = 180  # seconds to wait for a saved network at boot before the hotspot
+# (a Pi Zero W can take well over a minute to join Wi-Fi while cloud-init runs)
 NO_PROFILE_WAIT = 10  # ... when there is no saved Wi-Fi at all
 DROPOUT_WAIT = 300  # a working network vanished: wait this long before the hotspot
 RETRY_EVERY = 300  # while the hotspot is up and nobody is on it, retry saved Wi-Fi

@@ -100,7 +100,8 @@ install -m 644 "$APP/system/journald.conf" /etc/systemd/journald.conf.d/looper.c
 echo "==> Keep the console off the projector"
 sysd disable getty@tty1.service >/dev/null 2>&1 || true
 
-if [ "${SKIP_BOOT_TWEAKS:-0}" != "1" ]; then
+# Boot tweaks are opt-in until they've been proven on hardware:  sudo BOOT_TWEAKS=1 bash install.sh
+if [ "${BOOT_TWEAKS:-0}" = "1" ]; then
   LOOPER_IMAGE_BUILD="$IMAGE" bash "$APP/tools/optimize-boot.sh"
 fi
 
@@ -111,5 +112,5 @@ fi
 
 systemctl restart looper-net.service rpi-video-looper.service 2>/dev/null || true
 echo
-echo "Done. Reboot to apply the boot tweaks:  sudo reboot"
+echo "Done. Reboot to start playing:  sudo reboot"
 echo "Web UI:  http://$(hostname).local:8080/"
