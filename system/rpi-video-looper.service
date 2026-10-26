@@ -24,10 +24,9 @@ Restart=always
 RestartSec=2
 TimeoutStartSec=60
 
-# Video gets priority over anything else on this little CPU.
-Nice=-5
-CPUWeight=1000
-IOWeight=1000
+# No priority boost: on a single-core Zero a boosted player can starve Wi-Fi and SSH
+# (that's how the first hardware test locked up). Normal priority is plenty when
+# the video is hardware-decoded.
 # Hard ceiling so a runaway can never take the whole 512 MB down with it.
 MemoryHigh=300M
 MemoryMax=380M
