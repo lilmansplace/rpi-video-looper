@@ -22,13 +22,14 @@ from looper.player import MpvPlayer  # noqa: E402
 FAST = ["--profile=fast"]  # bilinear scaling, no dithering/debanding: much less GPU work
 HD720 = ["--drm-mode=1280x720"]  # drive HDMI at 720p: 2.25x fewer pixels to draw
 
+OVERLAY = ["--gpu-hwdec-interop=drmprime-overlay"]  # decoded frames go straight to a display plane
+
 COMBOS = [
-    ("gpu, hw copy", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m-copy"}, []),
-    ("gpu, hw copy, fast", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m-copy"}, FAST),
-    ("gpu, hw copy, fast, 720p", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m-copy"}, FAST + HD720),
-    ("drm, hw copy, 720p", {"vo": "drm", "gpu_context": "", "hwdec": "v4l2m2m-copy"}, HD720),
-    ("gpu, hw zero-copy, fast, 720p", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m"}, FAST + HD720),
-    ("gpu, software, fast, 720p", {"vo": "gpu", "gpu_context": "drm", "hwdec": "no"}, FAST + HD720),
+    # zero-copy into a KMS overlay plane: no GL texture import (closest to omxplayer)
+    ("zero-copy overlay, 720p", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m"}, FAST + HD720 + OVERLAY),
+    ("zero-copy overlay, native", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m"}, FAST + OVERLAY),
+    # zero-copy via GL texture import (v0.3 default; froze a Pi Zero W during boot-time starts)
+    ("zero-copy GL, 720p", {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m"}, FAST + HD720),
 ]
 
 
@@ -43,7 +44,7 @@ def main():
         print(__doc__)
         return 1
     video = sys.argv[1]
-    secs = int(sys.argv[2]) if len(sys.argv) > 2 else 20
+    secs = int(sys.argv[2]) if len(sys.argv) > 2 else 60
     sock = "/tmp/looper-bench.sock"
     results = []
     print(f"{'setup':<32} {'hw':<14} {'speed':>5} {'drop':>5} {'cpu':>5}")
