@@ -536,19 +536,21 @@ class Controller:
         sdnotify.notify("READY=1")  # web UI is up; don't hold up the boot itself
         self._set(status="starting")
         deadline, calm = time.monotonic() + max_wait, 0
+        cpu_busy()  # start a fresh measurement window
         while self._running and time.monotonic() < deadline:
             try:
                 st = subprocess.run(["systemctl", "is-system-running"], capture_output=True,
                                     text=True, timeout=10).stdout.strip()
             except (OSError, subprocess.TimeoutExpired):
                 st = "unknown"
-            load = os.getloadavg()[0]
-            calm = calm + 1 if st not in ("initializing", "starting") and load < 1.5 else 0
+            busy = cpu_busy()  # real CPU use since the last check (load average lies here:
+            # a task stuck waiting on hardware kept it at 3.4 on an idle Pi)
+            calm = calm + 1 if st not in ("initializing", "starting") and busy < 60 else 0
             if calm >= 3:
-                log.info("boot settled (system %s, load %.2f)", st, load)
+                log.info("boot settled (system %s, cpu %.0f%%)", st, busy)
                 return
             sdnotify.notify("WATCHDOG=1")
-            time.sleep(2)
+            time.sleep(3)
         log.info("starting playback anyway after %ss", max_wait)
 
     def run(self) -> None:
