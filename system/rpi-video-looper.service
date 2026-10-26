@@ -1,0 +1,36 @@
+[Unit]
+Description=rpi-video-looper
+# Start as soon as local disks are up. We deliberately do NOT wait for the
+# network: video should be on screen before Wi-Fi has even associated.
+After=local-fs.target systemd-udevd.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=looper
+Group=looper
+SupplementaryGroups=video render audio input
+WorkingDirectory=/opt/rpi-video-looper
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m looper
+RuntimeDirectory=looper
+StateDirectory=looper
+
+# Self-healing: restart if the process hangs (no watchdog ping) or crashes.
+WatchdogSec=60
+Restart=always
+RestartSec=2
+TimeoutStartSec=60
+
+# Video gets priority over anything else on this little CPU.
+Nice=-5
+CPUWeight=1000
+IOWeight=1000
+# Hard ceiling so a runaway can never take the whole 512 MB down with it.
+MemoryHigh=300M
+MemoryMax=380M
+
+[Install]
+WantedBy=multi-user.target

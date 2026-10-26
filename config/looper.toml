@@ -1,0 +1,52 @@
+# rpi-video-looper settings
+# This file lives on the SD card's boot partition (/boot/firmware/looper.toml),
+# so you can edit it from any computer. Changes made in the web UI or Home
+# Assistant are saved separately in /var/lib/looper/settings.json and win over
+# the values below. Restart the looper (or reboot) after editing.
+
+[media]
+dir = "/media/usb"              # the thumb drive is mounted here automatically
+device = "/dev/sda1"            # set to "" if your videos are on the SD card instead
+extensions = ["mp4", "m4v", "mkv", "mov", "avi", "h264", "ts"]
+rescan_interval = 30            # seconds between checks for new/removed files (0 = off)
+recursive = true
+
+[playback]
+shuffle = true
+repeat = "all"                  # all | one | off
+volume = 100
+resume_on_boot = false          # true = start with the last video that was playing
+
+[player]
+# Pi Zero W decodes H.264 in hardware (up to 1080p30). HEVC/H.265 and VP9 are
+# NOT hardware-decoded on a Zero and will stutter.
+# Run tools/bench.py to find the smoothest combination for your files.
+vo = "gpu"
+gpu_context = "drm"
+hwdec = "auto-safe"
+audio_output = "alsa"
+extra_args = []
+
+[snapshot]
+interval = 30                   # seconds between snapshots (0 = off)
+width = 480
+quality = 70
+ffmpeg_fallback = false         # costs CPU; only enable if snapshots stay blank
+
+[status]
+position_interval = 10          # how often the playback position is published
+
+[mqtt]
+enabled = false
+host = "homeassistant.local"
+port = 1883
+username = ""
+password = ""
+discovery_prefix = "homeassistant"
+node_id = "rpi_looper"          # change if you run more than one looper
+name = "Video Looper"
+
+[web]
+enabled = true
+bind = "0.0.0.0"
+port = 8080

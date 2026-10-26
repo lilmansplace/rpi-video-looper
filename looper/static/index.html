@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Looper</title>
+<style>
+  :root { --bg:#111418; --card:#1b2027; --fg:#e8ecf1; --mute:#8b95a3; --acc:#ff8a3d; --line:#2a313b; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.4 system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  main { max-width:640px; margin:0 auto; padding:16px; }
+  h1 { font-size:18px; margin:4px 0 12px; display:flex; justify-content:space-between; align-items:center; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:99px; background:var(--line); color:var(--mute); }
+  .pill.playing { background:#1f3d2b; color:#7be0a0; } .pill.paused { background:#3d331f; color:#f0c96b; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px; margin-bottom:12px; }
+  img { width:100%; aspect-ratio:16/9; object-fit:cover; border-radius:8px; background:#000; display:block; }
+  .title { font-size:17px; font-weight:600; margin:10px 0 2px; word-break:break-word; }
+  .meta { color:var(--mute); font-size:13px; }
+  .bar { height:4px; background:var(--line); border-radius:4px; margin-top:8px; overflow:hidden; }
+  .bar > div { height:100%; background:var(--acc); width:0; transition:width .5s; }
+  .controls { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:12px; }
+  button, select, input { font:inherit; color:var(--fg); background:#252b34; border:1px solid var(--line); border-radius:8px; padding:10px; }
+  button { cursor:pointer; } button:active { background:var(--acc); color:#111; }
+  label { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; }
+  label input[type=number] { width:90px; } input[type=range] { flex:1; }
+  select { width:100%; }
+  .stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--mute); font-size:12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Video Looper <span id="status" class="pill">…</span></h1>
+
+  <div class="card">
+    <img id="snap" alt="Latest snapshot">
+    <div class="title" id="title">—</div>
+    <div class="meta"><span id="pos">0:00</span> / <span id="dur">0:00</span> · <span id="idx"></span></div>
+    <div class="bar"><div id="prog"></div></div>
+    <div class="controls">
+      <button data-cmd="previous" title="Previous">⏮</button>
+      <button data-cmd="toggle_pause" title="Play/Pause">⏯</button>
+      <button data-cmd="next" title="Next">⏭</button>
+      <button data-cmd="restart" title="Restart">↺</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <label>Play video</label>
+    <select id="library"></select>
+  </div>
+
+  <div class="card">
+    <label>Shuffle <input type="checkbox" data-set="shuffle"></label>
+    <label>Repeat
+      <select data-set="repeat" style="width:auto"><option>all</option><option>one</option><option>off</option></select>
+    </label>
+    <label>Volume <input type="range" min="0" max="100" step="5" data-set="volume"></label>
+    <label>Snapshot every (s, 0 = off) <input type="number" min="0" max="3600" data-set="snapshot_interval"></label>
+    <label>Position update (s) <input type="number" min="2" max="300" data-set="position_interval"></label>
+    <label>USB rescan (s, 0 = off) <input type="number" min="0" max="3600" data-set="rescan_interval"></label>
+    <button data-cmd="rescan" style="width:100%;margin-top:6px">Rescan USB now</button>
+  </div>
+
+  <div class="stats" id="stats"></div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const fmt = s => { s = Math.max(0, s|0); return `${(s/60)|0}:${String(s%60).padStart(2,'0')}`; };
+let state = {}, lastSnap = null, editing = null, libCount = -1;
+
+async function post(url, body) {
+  await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  setTimeout(refresh, 300);
+}
+document.querySelectorAll('[data-cmd]').forEach(b => b.onclick = () => post('/api/cmd', {cmd: b.dataset.cmd}));
+document.querySelectorAll('[data-set]').forEach(el => {
+  el.onfocus = () => editing = el; el.onblur = () => editing = null;
+  el.onchange = () => {
+    const v = el.type === 'checkbox' ? el.checked : el.type === 'select-one' ? el.value : Number(el.value);
+    post('/api/settings', {[el.dataset.set]: v});
+  };
+});
+$('#library').onchange = e => { if (e.target.value !== '') post('/api/cmd', {cmd:'jump', arg: Number(e.target.value)}); };
+
+async function loadLibrary() {
+  const titles = await (await fetch('/api/library')).json();
+  $('#library').innerHTML = '<option value="">Choose…</option>' +
+    titles.map((t,i) => `<option value="${i}">${t.replace(/</g,'&lt;')}</option>`).join('');
+  libCount = titles.length;
+}
+
+async function refresh() {
+  try { state = await (await fetch('/api/state')).json(); } catch { return; }
+  $('#status').textContent = state.status; $('#status').className = 'pill ' + state.status;
+  $('#title').textContent = state.title || 'Nothing playing';
+  $('#pos').textContent = fmt(state.position); $('#dur').textContent = fmt(state.duration);
+  $('#idx').textContent = state.count ? `${state.index + 1} of ${state.count}` : 'no videos found';
+  $('#prog').style.width = state.duration ? `${100 * state.position / state.duration}%` : '0';
+  document.querySelectorAll('[data-set]').forEach(el => {
+    if (el === editing) return;
+    const v = state[el.dataset.set];
+    if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
+  });
+  if (state.snapshot_time !== lastSnap) { lastSnap = state.snapshot_time; $('#snap').src = '/snapshot.jpg?t=' + lastSnap; }
+  if (state.count !== libCount) loadLibrary();
+  const s = state.system || {};
+  $('#stats').innerHTML = [`v${state.version}`, s.cpu_temp != null && `${s.cpu_temp}°C`,
+    s.load1 != null && `load ${s.load1}`, `${s.mem_avail_mb} MB free`, s.throttled && '⚠ throttled'].filter(Boolean)
+    .map(x => `<span>${x}</span>`).join('');
+}
+// poll gently: the Pi does the work, not the phone
+refresh(); setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+</script>
+</body>
+</html>
