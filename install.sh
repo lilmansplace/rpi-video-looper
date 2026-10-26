@@ -102,9 +102,10 @@ install -m 644 "$APP/system/journald.conf" /etc/systemd/journald.conf.d/looper.c
 echo "==> Keep the console off the projector"
 sysd disable getty@tty1.service >/dev/null 2>&1 || true
 
-# Boot tweaks are opt-in until they've been proven on hardware:  sudo BOOT_TWEAKS=1 bash install.sh
-if [ "${BOOT_TWEAKS:-0}" = "1" ]; then
-  LOOPER_IMAGE_BUILD="$IMAGE" bash "$APP/tools/optimize-boot.sh"
+# Fast-boot trimming is a separate, reversible step once the looper works:
+#   sudo /opt/rpi-video-looper/tools/lean.sh      (--no-ssh to turn SSH off, --undo to revert)
+if [ "${LEAN:-0}" = "1" ]; then
+  bash "$APP/tools/lean.sh"
 fi
 
 if [ "$IMAGE" = 1 ]; then

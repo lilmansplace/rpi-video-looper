@@ -184,7 +184,7 @@ sudo -u looper python3 /opt/rpi-video-looper/tools/playcheck.py      # frames sh
 
 - `tools/optimize-boot.sh` (run by the installer) disables the splash, Bluetooth, unused services and
   boot delays. It backs up `config.txt` / `cmdline.txt` first.
-- Boot tweaks are **opt-in** (`sudo BOOT_TWEAKS=1 bash install.sh`) until they're proven on hardware.
+- **Fast boot:** once it works, run `sudo /opt/rpi-video-looper/tools/lean.sh` (saves Wi-Fi permanently, turns off cloud-init and unused services, trims firmware/kernel boot steps). `--no-ssh` also turns SSH off (turn it back on with `[ssh] enabled = true` in `looper.toml`); `--undo` reverts everything.
 - **Power:** a Pi Zero W fed from a projector's USB port is marginal. Plug the thumb drive in *before*
   powering on: hot-plugging it can brown out the Pi and reset it. A dedicated 5 V 2.5 A supply is best.
 - Shut down with `sudo poweroff` when you can. Pulling power while the Pi writes to the SD card's
