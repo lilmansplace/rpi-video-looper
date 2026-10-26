@@ -25,6 +25,10 @@ jobs:
         with:
           platforms: arm
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Tests
         run: |
           pip install --quiet paho-mqtt pillow qrcode

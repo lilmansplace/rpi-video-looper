@@ -336,7 +336,7 @@ class NetSetup:
                     except RuntimeError as e:
                         log.error("%s", e)
             name = (cfg.get("device") or {}).get("name")
-            if name:
+            if name and name != DEFAULTS["device"]["name"]:  # keep the hostname unless renamed
                 self.sys.set_hostname(name)
             ssh = cfg.get("ssh") or {}
             if "enabled" in ssh or ssh.get("password"):

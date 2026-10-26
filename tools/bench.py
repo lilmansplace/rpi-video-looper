@@ -17,11 +17,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from looper.player import MpvPlayer  # noqa: E402
 
 COMBOS = [
-    {"vo": "gpu", "gpu_context": "drm", "hwdec": "drm"},
+    # Pi Zero/1/2/3 decode H.264 with the bcm2835-codec V4L2 driver (/dev/video10).
     {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m-copy"},
-    {"vo": "gpu", "gpu_context": "drm", "hwdec": "auto-safe"},
+    {"vo": "gpu", "gpu_context": "drm", "hwdec": "v4l2m2m"},
+    {"vo": "gpu", "gpu_context": "drm", "hwdec": "drm", "extra": ["--gpu-hwdec-interop=drmprime-overlay"]},
+    {"vo": "gpu", "gpu_context": "drm", "hwdec": "drm-copy"},
     {"vo": "drm", "gpu_context": "", "hwdec": "v4l2m2m-copy"},
-    {"vo": "drm", "gpu_context": "", "hwdec": "no"},
+    {"vo": "drm", "gpu_context": "", "hwdec": "drm-copy"},
+    {"vo": "gpu", "gpu_context": "drm", "hwdec": "no"},  # software baseline
 ]
 
 
@@ -40,8 +43,8 @@ def main():
     sock = "/tmp/looper-bench.sock"
     results = []
     for c in COMBOS:
-        cfg = dict(c, audio_output="alsa", extra_args=[])
-        label = f"vo={c['vo']} hwdec={c['hwdec']}"
+        cfg = dict(c, audio_output="alsa", extra_args=c.get("extra", []))
+        label = f"vo={c['vo']} hwdec={c['hwdec']}" + (" +overlay" if c.get("extra") else "")
         p = MpvPlayer(cfg, sock)
         try:
             p.start()
@@ -69,6 +72,7 @@ def main():
     if ok:
         best = min(ok, key=lambda r: (r["dropped"], r["cpu"]))
         print(f"\nBest: {best['combo']}")
+        print("Put its vo / hwdec values in the [player] section of /boot/firmware/looper.toml")
     return 0
 
 
