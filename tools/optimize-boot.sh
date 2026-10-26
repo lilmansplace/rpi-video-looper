@@ -43,11 +43,8 @@ for unit in bluetooth.service hciuart.service ModemManager.service triggerhappy.
             keyboard-setup.service rpi-eeprom-update.service cups.service; do
   systemctl disable --now "$unit" >/dev/null 2>&1 || systemctl disable "$unit" >/dev/null 2>&1 || true
 done
-# cloud-init only matters on first boot (Raspberry Pi Imager settings). A ready-made image
-# keeps it for that first boot; looper-net turns it off once the Pi is online.
-if [ "${LOOPER_IMAGE_BUILD:-0}" != 1 ] && [ -d /etc/cloud ] && [ ! -f /etc/cloud/cloud-init.disabled ]; then
-  touch /etc/cloud/cloud-init.disabled
-fi
+# cloud-init is left alone: on Raspberry Pi OS Trixie it applies Raspberry Pi Imager's
+# settings (Wi-Fi, user, hostname) from the boot partition.
 
 echo "==> Boot tweaks applied. Reboot to see the difference."
 echo "    Restore with: cp $CFG.looper-bak $CFG && cp $CMD.looper-bak $CMD"

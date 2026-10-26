@@ -242,9 +242,9 @@ class System:
         run(["systemctl", "try-restart", "rpi-video-looper"], 30)
 
     def first_boot_done(self) -> None:
-        # cloud-init only matters on the very first boot (Imager settings); skip it afterwards.
-        if os.path.isdir("/etc/cloud") and not os.path.exists("/etc/cloud/cloud-init.disabled"):
-            open("/etc/cloud/cloud-init.disabled", "w").close()
+        # Hook for one-time cleanup after the first successful connection. cloud-init is
+        # deliberately left running: Raspberry Pi OS uses it for Imager's settings.
+        pass
 
 
 # ---------------------------------------------------------------- the service
