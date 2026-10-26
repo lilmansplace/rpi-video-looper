@@ -77,7 +77,9 @@ echo "==> Installing services"
 install -m 644 "$APP/system/rpi-video-looper.service" /etc/systemd/system/
 install -m 644 "$APP/system/looper-net.service" /etc/systemd/system/
 sysd daemon-reload
-sysd enable rpi-video-looper.service looper-net.service NetworkManager.service avahi-daemon.service >/dev/null
+for unit in rpi-video-looper.service looper-net.service NetworkManager.service avahi-daemon.service; do
+  sysd enable "$unit" >/dev/null 2>&1 || echo "    note: couldn't enable $unit (masked?)"
+done
 
 echo "==> Setup hotspot: send every web address to the setup page (captive portal)"
 mkdir -p /etc/NetworkManager/dnsmasq-shared.d
