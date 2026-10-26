@@ -26,6 +26,8 @@ apt-get update -qq
 #   python3-qrcode + fonts: setup screens on the projector
 #   dnsmasq-base: DHCP/DNS for the setup hotspot; avahi-utils: find Home Assistant
 apt-get install -y --no-install-recommends \
+  python3-gi gir1.2-gstreamer-1.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
+  gstreamer1.0-plugins-bad gstreamer1.0-libav gstreamer1.0-alsa \
   mpv ffmpeg python3 python3-paho-mqtt python3-pil python3-qrcode fonts-dejavu-core \
   network-manager dnsmasq-base avahi-daemon avahi-utils iw rfkill git ca-certificates
 

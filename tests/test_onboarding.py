@@ -343,6 +343,7 @@ class ControllerOverlayTests(unittest.TestCase):
         os.makedirs(media, exist_ok=True)
         open(os.path.join(media, "clip.mp4"), "w").close()
         cfg = config_mod.Config()
+        cfg.data["player"]["backend"] = "mpv"  # fake mpv in tests
         cfg.data["media"].update(dir=media, device="")
         cfg.data["snapshot"]["interval"] = 0
         fake = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_mpv.py")

@@ -17,7 +17,7 @@ A lightweight, fast-booting video looper for the **Raspberry Pi Zero W**, inspir
 
 | Concern | Approach |
 |---|---|
-| Decoding | One long-lived `mpv` process using the Pi's hardware H.264 decoder; the CPU mostly just shuffles buffers |
+| Decoding & display | GStreamer: the Pi's hardware H.264 decoder hands each frame straight to the display controller (`v4l2h264dec` → `kmssink`), so frames never touch the CPU. 1080p30 plays smoothly at ~52% CPU on a Zero W, the modern equivalent of omxplayer. (mpv is kept as a fallback, but on a Zero W it can't show 1080p smoothly.) |
 | Control | One small Python service (stdlib + paho-mqtt), single main thread, ~1 s tick, no web framework |
 | "Video stream" | Periodic stills instead of a live stream (a second encode would starve playback). JPEGs are shrunk with Pillow's DCT draft mode, which is very cheap |
 | SD card | Logs and snapshots live in RAM; the USB drive is mounted read-only |
@@ -25,8 +25,8 @@ A lightweight, fast-booting video looper for the **Raspberry Pi Zero W**, inspir
 | Bad files | Backoff on errors, so a broken drive can't spin the CPU |
 
 ```
- USB drive ──► mpv (hw decode) ──► HDMI ──► projector
-                  ▲  JSON IPC
+ USB drive ──► GStreamer (hw decode → display plane) ──► HDMI ──► projector
+                  ▲
                   │
             looper (Python) ──► web UI :8080
                   │
@@ -178,7 +178,8 @@ journalctl -u rpi-video-looper -f            # live log
 journalctl -u looper-net -f                  # Wi-Fi / setup hotspot log
 systemd-analyze blame                        # what's slowing boot
 sudo systemctl stop rpi-video-looper
-python3 /opt/rpi-video-looper/tools/bench.py /media/usb/clip.mp4   # find the smoothest player settings
+sudo /opt/rpi-video-looper/tools/gst-test.sh /media/usb/clip.mp4    # test the display pipeline
+sudo -u looper python3 /opt/rpi-video-looper/tools/playcheck.py      # frames shown vs dropped (mpv backend)
 ```
 
 - `tools/optimize-boot.sh` (run by the installer) disables the splash, Bluetooth, unused services and

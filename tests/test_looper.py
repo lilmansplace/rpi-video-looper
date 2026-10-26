@@ -118,6 +118,7 @@ class ControllerTests(unittest.TestCase):
         open(os.path.join(cls.media, "._one.mp4"), "w").close()  # mac junk
 
         cfg = config_mod.Config()
+        cfg.data["player"]["backend"] = "mpv"  # fake mpv in tests
         cfg.data["media"]["dir"] = cls.media
         cfg.data["media"]["device"] = ""
         cfg.data["playback"]["shuffle"] = False
@@ -219,6 +220,7 @@ class CompatControllerTests(unittest.TestCase):
         for n in ("a_fine", "b_hevc", "c_fine"):
             open(os.path.join(cls.media, f"{n}.mp4"), "w").close()
         cfg = config_mod.Config()
+        cfg.data["player"]["backend"] = "mpv"  # fake mpv in tests
         cfg.data["media"]["dir"] = cls.media
         cfg.data["media"]["device"] = ""
         cfg.data["playback"]["shuffle"] = False

@@ -40,15 +40,13 @@ skip_incompatible = false       # true = skip videos found to be too heavy for t
 [player]
 # Pi Zero W decodes H.264 in hardware (up to 1080p30). HEVC/H.265 and VP9 are
 # NOT hardware-decoded on a Zero and will stutter.
-# These defaults were measured on a Pi Zero W: 1080p30 plays in real time at ~58% CPU.
-# Run tools/bench.py to compare settings with your own files.
-vo = "gpu"
-gpu_context = "drm"
-hwdec = "v4l2m2m"               # zero-copy hardware decode
-profile = "fast"                # lighter scaling; "" = mpv's default (too heavy for a Zero)
-display_mode = "1280x720"       # HDMI output; "" = the projector's preferred mode
-audio_output = "alsa"
-extra_args = []
+# "gstreamer" puts hardware-decoded frames straight onto the screen: measured on a
+# Pi Zero W, 1080p30 plays smoothly with 0 dropped frames at ~52% CPU.
+backend = "gstreamer"           # or "mpv" (fallback; can't show 1080p smoothly on a Zero W)
+hwdec = "v4l2m2m"               # "no" = software decoding
+audio_output = "alsa"           # "null" = no sound
+video_sink = "kmssink driver-name=vc4 force-modesetting=false"
+hw_decoder = "v4l2h264dec capture-io-mode=dmabuf"
 
 [snapshot]
 interval = 30                   # seconds between snapshots (0 = off)

@@ -49,16 +49,21 @@ DEFAULTS: dict = {
         "boot_settle_max": 300,
     },
     "player": {
-        # Measured on a Pi Zero W (tools/bench.py): zero-copy hardware decode + mpv's
-        # "fast" profile + 720p output plays 1080p30 H.264 in real time at ~58% CPU.
-        # Copying frames back (v4l2m2m-copy) or drawing at 1080p can't keep up.
+        # "gstreamer": hardware H.264 decode straight onto a display plane. Measured on a
+        # Pi Zero W: 1080p30 smooth, 0 dropped frames, ~52% CPU (tools/gst-test.sh).
+        # "mpv": kept as a fallback; on a Pi Zero W it can't display 1080p smoothly.
+        "backend": "gstreamer",
+        "hwdec": "v4l2m2m",  # "no" = software decoding
+        "audio_output": "alsa",  # "null" = no sound
+        # GStreamer only
+        "video_sink": "kmssink driver-name=vc4 force-modesetting=false",
+        "hw_decoder": "v4l2h264dec capture-io-mode=dmabuf",
+        # mpv only
         "vo": "gpu",
         "gpu_context": "drm",
-        "hwdec": "v4l2m2m",
-        "profile": "fast",  # bilinear scaling, no dithering: far less GPU work ("" = mpv default)
-        "display_mode": "1280x720",  # HDMI output mode ("" = projector's preferred mode)
-        "audio_output": "alsa",
-        "extra_args": [],
+        "profile": "fast",
+        "display_mode": "",
+        "extra_args": ["--gpu-hwdec-interop=drmprime"],
     },
     "snapshot": {
         "interval": 30,  # seconds; 0 = off

@@ -75,7 +75,7 @@ class Controller:
         self.listeners: list = []  # fn(state: dict, kind: str) kind in state|library|snapshot
         pb = cfg.section("playback")
         self.playlist = Playlist(shuffle=pb["shuffle"], repeat=pb["repeat"])
-        self.player = MpvPlayer(cfg.section("player"), os.path.join(RUN_DIR, "mpv.sock"), self._on_mpv_event)
+        self.player = self._make_player()
         self.state: dict = {
             "status": "starting",
             "title": None,
@@ -291,11 +291,22 @@ class Controller:
             self._set(status="error")
             return False
 
+    def _make_player(self):
+        pc = self.cfg.section("player")
+        if str(pc.get("backend", "gstreamer")).lower() == "gstreamer":
+            from . import gstplayer
+            if gstplayer.Gst is not None:
+                return gstplayer.GstPlayer(pc, None, self._on_mpv_event)
+            log.warning("GStreamer bindings not installed; falling back to mpv")
+        return MpvPlayer(pc, os.path.join(RUN_DIR, "mpv.sock"), self._on_mpv_event)
+
     def _snapshot_method(self) -> str:
         sc = self.cfg.section("snapshot")
         m = str(sc.get("method", "auto")).lower()
         if m in ("file", "player"):
             return m
+        if self.player.__class__.__name__ == "GstPlayer":
+            return "file"
         hw = str(self.cfg.section("player").get("hwdec", "")).lower()
         zero_copy = hw not in ("", "no") and not hw.endswith("-copy") and hw != "auto-safe"
         return "file" if zero_copy else "player"
