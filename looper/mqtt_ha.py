@@ -49,6 +49,8 @@ SENSORS = {
     "position": ("Position", "{{ value_json.position }}", "s", "mdi:timer-outline", "duration", None),
     "duration": ("Duration", "{{ value_json.duration }}", "s", "mdi:timer-sand", "duration", None),
     "file_count": ("Video count", "{{ value_json.count }}", None, "mdi:filmstrip-box-multiple", None, None),
+    "format_warnings": ("Format warnings", "{{ value_json.warning_count }}", None, "mdi:alert-outline", None, None),
+    "video_format": ("Video format", "{{ value_json.video or 'None' }}", None, "mdi:video-box", None, "diagnostic"),
     "cpu_temp": ("CPU temperature", "{{ value_json.system.cpu_temp }}", "°C", None, "temperature", "diagnostic"),
     "load": ("CPU load", "{{ value_json.system.load1 }}", None, "mdi:chip", None, "diagnostic"),
     "memory": ("Free memory", "{{ value_json.system.mem_avail_mb }}", "MB", "mdi:memory", None, "diagnostic"),
@@ -127,6 +129,10 @@ class HomeAssistantMQTT:
                 p["entity_category"] = cat
             if key == "now_playing":
                 p["json_attributes_topic"] = st
+            if key == "format_warnings":
+                # attributes: {"videos": [{"title": ..., "reasons": [...]}, ...]}
+                p["json_attributes_topic"] = st
+                p["json_attributes_template"] = "{{ {'videos': value_json.warnings} | tojson }}"
             self._pub_config("sensor", key, p)
 
         for key, (name, icon) in BUTTONS.items():
@@ -150,6 +156,13 @@ class HomeAssistantMQTT:
             "state_topic": st,
             "value_template": "{{ 'ON' if value_json.shuffle else 'OFF' }}",
             "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:shuffle-variant",
+        })
+        self._pub_config("switch", "skip_incompatible", self._common("skip_incompatible", "Skip incompatible videos") | {
+            "command_topic": f"{self.base}/cmd/set/skip_incompatible",
+            "state_topic": st,
+            "value_template": "{{ 'ON' if value_json.skip_incompatible else 'OFF' }}",
+            "payload_on": "ON", "payload_off": "OFF", "icon": "mdi:debug-step-over",
+            "entity_category": "config",
         })
         self._pub_config("switch", "paused", self._common("paused", "Paused") | {
             "command_topic": f"{self.base}/cmd/pause_switch",
@@ -204,7 +217,7 @@ class HomeAssistantMQTT:
         cmd = msg.topic[len(self.base) + len("/cmd/"):]
         if cmd.startswith("set/"):
             key = cmd[4:]
-            if key == "shuffle":
+            if key in ("shuffle", "skip_incompatible"):
                 payload = payload.upper() == "ON"
             self.ctl.submit("set", (key, payload))
         elif cmd == "pause_switch":

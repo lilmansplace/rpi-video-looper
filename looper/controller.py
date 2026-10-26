@@ -7,6 +7,7 @@ One thread means no races and a tiny, predictable CPU footprint on a Pi Zero.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import queue
@@ -14,7 +15,7 @@ import shutil
 import threading
 import time
 
-from . import __version__, sdnotify, snapshot
+from . import __version__, compat, sdnotify, snapshot
 from .config import RUN_DIR, Config
 from .player import MpvPlayer, PlayerError
 from .playlist import Playlist, scan, title_of
@@ -67,6 +68,9 @@ class Controller:
             "duration": 0,
             "paused": False,
             "snapshot_time": None,
+            "video": None,  # e.g. "h264 1920x1080 30fps (hw)"
+            "warnings": [],  # [{"title", "reasons"}] for files in the library
+            "warning_count": 0,
             "version": __version__,
         }
         self.state.update(cfg.tunables())
@@ -74,6 +78,9 @@ class Controller:
         self._running = True
         self._errors = 0
         self._player_restarts = 0
+        self.compat_path = os.path.join(cfg.state_dir, "compat.json")
+        self.compat_db: dict = self._load_compat()
+        self._check_due: float | None = None
 
     # ---------- public API (thread-safe) ----------
     def submit(self, cmd: str, arg=None) -> None:
@@ -121,14 +128,94 @@ class Controller:
         elif name == "player-died":
             self.submit("_player_died")
 
+    # ---------- format compatibility ----------
+    def _load_compat(self) -> dict:
+        try:
+            with open(self.compat_path) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _save_compat(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.compat_path), exist_ok=True)
+            tmp = self.compat_path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.compat_db, f)
+            os.replace(tmp, self.compat_path)
+        except OSError as e:
+            log.debug("could not save compat db: %s", e)
+
+    @staticmethod
+    def _fingerprint(path: str):
+        try:
+            st = os.stat(path)
+            return [st.st_size, int(st.st_mtime)]
+        except OSError:
+            return None
+
+    def known_bad(self, path: str) -> list[str]:
+        """Reasons recorded for this exact file (re-checked if the file changes)."""
+        e = self.compat_db.get(path)
+        if e and e.get("fp") == self._fingerprint(path):
+            return e.get("reasons", [])
+        return []
+
+    def _refresh_warnings(self) -> None:
+        warnings = [
+            {"title": title_of(p), "reasons": self.known_bad(p)}
+            for p in self.playlist.files
+            if self.known_bad(p)
+        ]
+        self._set(warnings=warnings, warning_count=len(warnings))
+
+    def _check_current(self) -> None:
+        """Ask mpv what it is actually playing and judge it against the Pi's limits."""
+        path = self.playlist.current
+        if not path or self.state["status"] not in ("playing", "paused"):
+            return
+        p = self.player.get
+        codec = p("video-format") or p("video-codec")
+        width, height = p("width"), p("height")
+        fps = p("container-fps") or p("estimated-vf-fps")
+        hwdec = p("hwdec-current")
+        if codec is None and width is None:  # audio-only or not ready
+            return
+        wanted = str(self.cfg.section("player").get("hwdec", "")).lower() not in ("no", "")
+        reasons = compat.check(codec, width, height, fps, hwdec, hwdec_wanted=wanted)
+        desc = f"{compat.normalize_codec(codec) or '?'} {width or '?'}x{height or '?'}"
+        if fps:
+            desc += f" {float(fps):.0f}fps"
+        desc += " (hw)" if hwdec not in (None, "", "no") else " (software)"
+        self._set(video=desc)
+        old = self.compat_db.get(path, {}).get("reasons")
+        self.compat_db[path] = {"fp": self._fingerprint(path), "reasons": reasons, "video": desc}
+        if old != reasons:
+            self._save_compat()
+            if reasons:
+                log.warning("%s won't play smoothly: %s", title_of(path), "; ".join(reasons))
+        self._refresh_warnings()
+        if reasons and self.cfg.get("skip_incompatible") and self._has_good_file():
+            log.info("skipping incompatible %s", title_of(path))
+            self._play(self.playlist.next())
+
+    def _has_good_file(self) -> bool:
+        return any(not self.known_bad(f) for f in self.playlist.files)
+
     def _play(self, path: str | None) -> None:
+        if path and self.cfg.get("skip_incompatible") and self.known_bad(path) and self._has_good_file():
+            for _ in range(len(self.playlist.files)):
+                path = self.playlist.next()
+                if not path or not self.known_bad(path):
+                    break
+        self._check_due = None
         if not path:
             try:
                 self.player.stop_playback()
             except PlayerError:
                 pass
             self._set(status="idle" if self.playlist.files else "no_media",
-                      title=None, file=None, index=-1, position=0, duration=0, paused=False)
+                      title=None, file=None, index=-1, position=0, duration=0, paused=False, video=None)
             return
         log.info("playing %s", path)
         try:
@@ -138,7 +225,7 @@ class Controller:
             self.submit("_player_died")
             return
         self._set(status="playing", title=title_of(path), file=os.path.basename(path),
-                  index=self.playlist.index, position=0, duration=0, paused=False)
+                  index=self.playlist.index, position=0, duration=0, paused=False, video=None)
         try:
             with open(os.path.join(self.cfg.state_dir, "last"), "w") as f:
                 f.write(path)
@@ -155,6 +242,7 @@ class Controller:
         if self.playlist.set_files(files) or initial:
             log.info("library: %d files", len(files))
             self._set("library", count=len(files))
+            self._refresh_warnings()
             cur = self.playlist.current
             if not files:
                 self._play(None)
@@ -252,6 +340,9 @@ class Controller:
                 pl.set_shuffle(value)
             elif key == "repeat":
                 pl.repeat = value
+            elif key == "skip_incompatible" and value and pl.current and self.known_bad(pl.current) \
+                    and self._has_good_file():
+                self._play(pl.next())
             elif key == "volume":
                 try:
                     self.player.set("volume", value)
@@ -263,6 +354,8 @@ class Controller:
             self._errors = 0
             dur = self.player.get("duration")
             self._set(duration=int(dur or 0))
+            # give the decoder a moment so hwdec-current is meaningful
+            self._check_due = time.monotonic() + 2.5
         elif cmd == "_ended":
             self._play(pl.next(auto=True))
         elif cmd == "_file_error":
@@ -301,6 +394,12 @@ class Controller:
                 log.exception("command failed")
 
             now = time.monotonic()
+            if self._check_due and now >= self._check_due:
+                self._check_due = None
+                try:
+                    self._check_current()
+                except Exception:
+                    log.exception("compatibility check failed")
             if wd and now >= timers["watchdog"]:
                 # only pet the watchdog if mpv is healthy (or deliberately idle)
                 if self.player.alive() or self.state["status"] in ("no_media",):

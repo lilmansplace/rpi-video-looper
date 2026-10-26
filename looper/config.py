@@ -38,6 +38,9 @@ DEFAULTS: dict = {
         "repeat": "all",  # all | one | off
         "volume": 100,
         "resume_on_boot": False,  # start with the last played file
+        # Skip files the looper has found won't play smoothly on this Pi
+        # (wrong codec, 4K, 60 fps...). Off = play them anyway, but still warn.
+        "skip_incompatible": False,
     },
     "player": {
         # Pi Zero W: hardware H.264 decode via the bcm2835-codec V4L2 driver.
@@ -79,6 +82,7 @@ TUNABLES: dict = {
     "shuffle": ("playback", "shuffle", bool, None),
     "repeat": ("playback", "repeat", str, ["all", "one", "off"]),
     "volume": ("playback", "volume", int, (0, 100)),
+    "skip_incompatible": ("playback", "skip_incompatible", bool, None),
     "snapshot_interval": ("snapshot", "interval", int, (0, 3600)),
     "snapshot_width": ("snapshot", "width", int, (160, 1920)),
     "position_interval": ("status", "position_interval", int, (2, 300)),

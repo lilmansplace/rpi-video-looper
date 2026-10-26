@@ -24,6 +24,10 @@
   label { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:6px 0; }
   label input[type=number] { width:90px; } input[type=range] { flex:1; }
   select { width:100%; }
+  .warn { border-color:#6b4a1f; background:#2a2118; }
+  .warn h2 { font-size:14px; margin:0 0 6px; color:#f0c96b; }
+  .warn ul { margin:0; padding-left:18px; } .warn li { margin:4px 0; }
+  .warn small { color:var(--mute); display:block; }
   .stats { display:flex; gap:14px; flex-wrap:wrap; color:var(--mute); font-size:12px; }
 </style>
 </head>
@@ -34,7 +38,7 @@
   <div class="card">
     <img id="snap" alt="Latest snapshot">
     <div class="title" id="title">—</div>
-    <div class="meta"><span id="pos">0:00</span> / <span id="dur">0:00</span> · <span id="idx"></span></div>
+    <div class="meta"><span id="pos">0:00</span> / <span id="dur">0:00</span> · <span id="idx"></span> · <span id="vid"></span></div>
     <div class="bar"><div id="prog"></div></div>
     <div class="controls">
       <button data-cmd="previous" title="Previous">⏮</button>
@@ -42,6 +46,12 @@
       <button data-cmd="next" title="Next">⏭</button>
       <button data-cmd="restart" title="Restart">↺</button>
     </div>
+  </div>
+
+  <div class="card warn" id="warnbox" hidden>
+    <h2 id="warntitle"></h2>
+    <ul id="warnlist"></ul>
+    <small>Convert them on a computer with tools/convert_videos.py, or turn on "Skip incompatible videos".</small>
   </div>
 
   <div class="card">
@@ -54,6 +64,7 @@
     <label>Repeat
       <select data-set="repeat" style="width:auto"><option>all</option><option>one</option><option>off</option></select>
     </label>
+    <label>Skip incompatible videos <input type="checkbox" data-set="skip_incompatible"></label>
     <label>Volume <input type="range" min="0" max="100" step="5" data-set="volume"></label>
     <label>Snapshot every (s, 0 = off) <input type="number" min="0" max="3600" data-set="snapshot_interval"></label>
     <label>Position update (s) <input type="number" min="2" max="300" data-set="position_interval"></label>
@@ -65,6 +76,7 @@
 </main>
 <script>
 const $ = s => document.querySelector(s);
+const esc = t => String(t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fmt = s => { s = Math.max(0, s|0); return `${(s/60)|0}:${String(s%60).padStart(2,'0')}`; };
 let state = {}, lastSnap = null, editing = null, libCount = -1;
 
@@ -85,7 +97,7 @@ $('#library').onchange = e => { if (e.target.value !== '') post('/api/cmd', {cmd
 async function loadLibrary() {
   const titles = await (await fetch('/api/library')).json();
   $('#library').innerHTML = '<option value="">Choose…</option>' +
-    titles.map((t,i) => `<option value="${i}">${t.replace(/</g,'&lt;')}</option>`).join('');
+    titles.map((t,i) => `<option value="${i}">${esc(t)}</option>`).join('');
   libCount = titles.length;
 }
 
@@ -101,6 +113,11 @@ async function refresh() {
     const v = state[el.dataset.set];
     if (el.type === 'checkbox') el.checked = !!v; else el.value = v;
   });
+  $('#vid').textContent = state.video || '';
+  const w = state.warnings || [];
+  $('#warnbox').hidden = !w.length;
+  $('#warntitle').textContent = `${w.length} video${w.length === 1 ? '' : 's'} won't play smoothly on this Pi`;
+  $('#warnlist').innerHTML = w.map(x => `<li><b>${esc(x.title)}</b><small>${x.reasons.map(esc).join('<br>')}</small></li>`).join('');
   if (state.snapshot_time !== lastSnap) { lastSnap = state.snapshot_time; $('#snap').src = '/snapshot.jpg?t=' + lastSnap; }
   if (state.count !== libCount) loadLibrary();
   const s = state.system || {};

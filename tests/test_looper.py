@@ -97,6 +97,19 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(c.get("volume"), 100)
 
 
+class CompatTests(unittest.TestCase):
+    def test_rules(self):
+        from looper.compat import check
+        self.assertEqual(check("h264", 1920, 1080, 29.97, "drm"), [])
+        self.assertEqual(check("h264 (H.264 / AVC)", 1280, 720, 60, "drm"), [])
+        self.assertIn("HEVC", check("hevc", 1920, 1080, 30)[0])
+        self.assertIn("4K", check("h264", 3840, 2160, 30)[0])
+        self.assertIn("fps", check("h264", 1920, 1080, 60)[0])
+        self.assertIn("hardware decoding", check("h264", 1920, 1080, 30, "no")[0])
+        self.assertEqual(check("h264", 1920, 1080, 30, "no", hwdec_wanted=False), [])
+        self.assertEqual(check(None, None, None, None), [])
+
+
 class ControllerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -116,7 +129,9 @@ class ControllerTests(unittest.TestCase):
         cfg.data["snapshot"]["interval"] = 1
         cfg.data["status"]["position_interval"] = 2
         fake = os.path.join(ROOT, "tests", "fake_mpv.py")
-        orig_args = controller.MpvPlayer.args
+        if not hasattr(controller.MpvPlayer, "_orig_args"):
+            controller.MpvPlayer._orig_args = controller.MpvPlayer.args
+        orig_args = controller.MpvPlayer._orig_args
         controller.MpvPlayer.args = lambda self: [sys.executable, fake] + orig_args(self)[1:]
         os.environ["FAKE_MPV_LEN"] = "1.5"
         cls.ctl = controller.Controller(cfg)
@@ -194,6 +209,64 @@ class ControllerTests(unittest.TestCase):
             self.api("/api/cmd", {"cmd": "rm -rf"})
         with self.assertRaises(urllib.error.HTTPError):
             self.api("/api/settings", {"hwdec": "no"})
+
+
+class CompatControllerTests(unittest.TestCase):
+    """A file the Pi can't handle gets flagged, and skipped when asked."""
+
+    @classmethod
+    def setUpClass(cls):
+        from looper import controller, web
+
+        cls.media = os.path.join(TMP, "media2")
+        os.makedirs(cls.media)
+        for n in ("a_fine", "b_hevc", "c_fine"):
+            open(os.path.join(cls.media, f"{n}.mp4"), "w").close()
+        cfg = config_mod.Config()
+        cfg.data["media"]["dir"] = cls.media
+        cfg.data["media"]["device"] = ""
+        cfg.data["playback"]["shuffle"] = False
+        cfg.data["playback"]["repeat"] = "one"
+        cfg.data["snapshot"]["interval"] = 0
+        fake = os.path.join(ROOT, "tests", "fake_mpv.py")
+        if not hasattr(controller.MpvPlayer, "_orig_args"):
+            controller.MpvPlayer._orig_args = controller.MpvPlayer.args
+        orig = controller.MpvPlayer._orig_args
+        controller.MpvPlayer.args = lambda self: [sys.executable, fake] + orig(self)[1:]
+        os.environ["FAKE_MPV_LEN"] = "30"
+        cls.ctl = controller.Controller(cfg)
+        cls.srv = web.start({"bind": "127.0.0.1", "port": 0}, cls.ctl)
+        cls.port = cls.srv.server_address[1]
+        cls.thread = threading.Thread(target=cls.ctl.run, daemon=True)
+        cls.thread.start()
+        time.sleep(1.0)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ctl.shutdown()
+        cls.thread.join(5)
+        cls.srv.shutdown()
+
+    api = ControllerTests.api
+    wait_for = ControllerTests.wait_for
+
+    def test_flag_then_skip(self):
+        self.wait_for(lambda s: s["status"] == "playing")
+        self.api("/api/cmd", {"cmd": "jump", "arg": "b_hevc"})
+        s = self.wait_for(lambda s: s["warning_count"] == 1, timeout=8)
+        self.assertEqual(s["warnings"][0]["title"], "b_hevc")
+        self.assertIn("HEVC", s["warnings"][0]["reasons"][0])
+        self.assertTrue(s["video"].startswith("hevc 1920x1080"))
+        # turning on skip moves off the bad file right away
+        self.api("/api/settings", {"skip_incompatible": True})
+        self.wait_for(lambda s: s["title"] == "c_fine")
+        # and it is never chosen again, even when asked for directly
+        self.api("/api/cmd", {"cmd": "jump", "arg": "b_hevc"})
+        time.sleep(1)
+        self.assertNotEqual(self.api("/api/state")["title"], "b_hevc")
+        # the verdict survives a restart
+        self.assertIn("b_hevc.mp4", open(self.ctl.compat_path).read())
+        self.api("/api/settings", {"skip_incompatible": False})
 
 
 if __name__ == "__main__":

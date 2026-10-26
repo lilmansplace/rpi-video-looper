@@ -16,6 +16,7 @@ shuffle = true
 repeat = "all"                  # all | one | off
 volume = 100
 resume_on_boot = false          # true = start with the last video that was playing
+skip_incompatible = false       # true = skip videos found to be too heavy for the Pi (4K, HEVC, 60fps...)
 
 [player]
 # Pi Zero W decodes H.264 in hardware (up to 1080p30). HEVC/H.265 and VP9 are

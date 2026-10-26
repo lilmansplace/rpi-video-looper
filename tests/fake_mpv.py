@@ -14,7 +14,8 @@ import time
 
 LEN = float(os.environ.get("FAKE_MPV_LEN", "1"))
 path = next(a.split("=", 1)[1] for a in sys.argv if a.startswith("--input-ipc-server="))
-props = {"pause": False, "volume": 100, "time-pos": 0.0, "duration": LEN, "path": None}
+props = {"pause": False, "volume": 100, "time-pos": 0.0, "duration": LEN, "path": None,
+         "video-format": "h264", "width": 1920, "height": 1080, "container-fps": 30.0, "hwdec-current": "drm"}
 srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 srv.bind(path)
 srv.listen(1)
@@ -63,6 +64,9 @@ while True:
         elif name == "loadfile":
             gen += 1
             props["path"] = cmd[1]
+            name = os.path.basename(cmd[1]).lower()
+            props["video-format"] = "hevc" if "hevc" in name else "h264"
+            props["width"], props["height"] = (3840, 2160) if "4k" in name else (1920, 1080)
             props["time-pos"] = 0.0
             threading.Thread(target=play, args=(gen, cmd[1]), daemon=True).start()
         elif name == "stop":
