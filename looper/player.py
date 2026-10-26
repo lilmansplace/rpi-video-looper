@@ -65,11 +65,15 @@ class MpvPlayer:
             "--demuxer-max-bytes=16MiB",  # cap RAM use (512 MB total on a Zero)
             "--demuxer-max-back-bytes=2MiB",
             f"--vo={c.get('vo', 'gpu')}",
-            f"--hwdec={c.get('hwdec', 'auto-safe')}",
+            f"--hwdec={c.get('hwdec', 'v4l2m2m')}",
             f"--ao={c.get('audio_output', 'alsa')}",
         ]
         if c.get("gpu_context") and c.get("vo") == "gpu":
             a.append(f"--gpu-context={c['gpu_context']}")
+        if c.get("profile"):
+            a.append(f"--profile={c['profile']}")
+        if c.get("display_mode") and (c.get("vo") == "drm" or c.get("gpu_context") == "drm"):
+            a.append(f"--drm-mode={c['display_mode']}")
         a += list(c.get("extra_args", []))
         return a
 
@@ -196,9 +200,13 @@ class MpvPlayer:
 
     def screenshot(self, path: str) -> bool:
         """Grab the current video frame (without OSD) to a file."""
-        try:
-            self.command("screenshot-to-file", path, "video", timeout=10)
-            return os.path.exists(path)
-        except PlayerError as e:
-            log.debug("mpv screenshot failed: %s", e)
-            return False
+        # "video" needs the decoded frame in RAM, which zero-copy hwdec doesn't have;
+        # "window" reads back what's on screen instead (720p, a brief GPU readback).
+        for mode in ("video", "window"):
+            try:
+                self.command("screenshot-to-file", path, mode, timeout=10)
+                if os.path.exists(path):
+                    return True
+            except PlayerError as e:
+                log.debug("mpv %s screenshot failed: %s", mode, e)
+        return False

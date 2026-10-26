@@ -47,11 +47,14 @@ DEFAULTS: dict = {
         "skip_incompatible": False,
     },
     "player": {
-        # Pi Zero W: hardware H.264 decode via the bcm2835-codec V4L2 driver.
-        # tools/bench.py tries the combinations and tells you which one is smooth.
+        # Measured on a Pi Zero W (tools/bench.py): zero-copy hardware decode + mpv's
+        # "fast" profile + 720p output plays 1080p30 H.264 in real time at ~58% CPU.
+        # Copying frames back (v4l2m2m-copy) or drawing at 1080p can't keep up.
         "vo": "gpu",
         "gpu_context": "drm",
-        "hwdec": "auto-safe",
+        "hwdec": "v4l2m2m",
+        "profile": "fast",  # bilinear scaling, no dithering: far less GPU work ("" = mpv default)
+        "display_mode": "1280x720",  # HDMI output mode ("" = projector's preferred mode)
         "audio_output": "alsa",
         "extra_args": [],
     },
