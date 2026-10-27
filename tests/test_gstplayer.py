@@ -150,7 +150,8 @@ class ControllerWithGstTests(unittest.TestCase):
         cfg.data["snapshot"]["interval"] = 0
         ctl = controller.Controller(cfg)
         self.assertEqual(ctl.player.__class__.__name__, "GstPlayer")
-        self.assertEqual(ctl._snapshot_method(), "file")
+        # GstPlayer writes a live JPEG straight off the decoded frames
+        self.assertEqual(ctl._snapshot_method(), "live")
         t = threading.Thread(target=ctl.run, daemon=True)
         t.start()
         try:

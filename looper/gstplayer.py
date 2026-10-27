@@ -34,9 +34,10 @@ DEFAULT_HW = "v4l2h264dec capture-io-mode=dmabuf"
 
 
 class GstPlayer:
-    def __init__(self, cfg: dict, socket_path: str | None = None, on_event=None):
+    def __init__(self, cfg: dict, socket_path: str | None = None, on_event=None, snapshot: dict | None = None):
         self.cfg = cfg
         self.on_event = on_event or (lambda ev: None)
+        self.snap = snapshot or {}  # {path, interval, width, quality}: live stills off the decoded frames
         self.pipeline = None
         self.path: str | None = None
         self._alive = False
@@ -76,6 +77,28 @@ class GstPlayer:
     def _sink_desc(self) -> str:
         return self.cfg.get("video_sink") or DEFAULT_SINK
 
+    def _video_tail(self, w, h) -> str:
+        """What comes after the decoder: either straight to the sink, or a tee that also
+        saves a downscaled JPEG of the live frames every snapshot.interval seconds.
+
+        The frames are already hardware-decoded for the screen, so the snapshot branch only
+        costs a periodic small JPEG encode (~1% CPU) -- far cheaper than re-decoding the file.
+        A leaky queue keeps the branch from ever stalling the display."""
+        s = self.snap
+        interval = int(s.get("interval") or 0)
+        path = s.get("path")
+        if interval <= 0 or not path:
+            return f" ! {self._sink_desc()}"
+        sw = int(s.get("width") or 480)
+        sh = max(2, round(sw * (h or 9) / (w or 16)))
+        sh -= sh % 2  # jpegenc/videoscale want an even height
+        q = int(s.get("quality") or 70)
+        return (f" ! tee name=snaptee snaptee. ! queue ! {self._sink_desc()} "
+                f"snaptee. ! queue leaky=downstream max-size-buffers=2 ! videorate ! "
+                f"video/x-raw,framerate=1/{interval} ! videoconvert ! videoscale ! "
+                f"video/x-raw,width={sw},height={sh} ! jpegenc quality={q} ! "
+                f"multifilesink location={path} post-messages=false")
+
     def _make_branch(self, desc: str):
         """Build a bin from `desc` whose only external pad is a sink on its first element.
 
@@ -105,7 +128,8 @@ class GstPlayer:
             info.update(video=codec, width=w if ok_w else None, height=h if ok_h else None,
                         fps=(num / den) if ok_f and den else None)
             if codec == "h264" and self.cfg.get("hwdec", "v4l2m2m") not in ("no", ""):
-                desc = f"queue max-size-buffers=8 ! {self.cfg.get('hw_decoder') or DEFAULT_HW} ! {self._sink_desc()}"
+                tail = self._video_tail(w if ok_w else None, h if ok_h else None)
+                desc = f"queue max-size-buffers=8 ! {self.cfg.get('hw_decoder') or DEFAULT_HW}{tail}"
                 info["hw"] = "v4l2m2m"
             else:
                 desc = f"queue ! decodebin ! videoconvert ! videoscale ! {self._sink_desc()}"
@@ -117,15 +141,21 @@ class GstPlayer:
                     f"volume name=vol volume={self._volume} ! {sink}")
         else:
             desc = "queue ! fakesink sync=false"
-        try:
-            branch = self._make_branch(desc)
-            pipeline.add(branch)
-            branch.sync_state_with_parent()
-            res = pad.link(branch.get_static_pad("sink"))
-            if res != Gst.PadLinkReturn.OK:
-                log.warning("could not link %s: %s", name, res)
-        except Exception as e:
-            log.error("could not build %s branch: %s", name, e)
+        for attempt in (desc, desc.split(" ! tee ", 1)[0] + f" ! {self._sink_desc()}" if " ! tee " in desc else None):
+            if attempt is None:
+                break
+            try:
+                branch = self._make_branch(attempt)
+                pipeline.add(branch)
+                branch.sync_state_with_parent()
+                res = pad.link(branch.get_static_pad("sink"))
+                if res != Gst.PadLinkReturn.OK:
+                    log.warning("could not link %s: %s", name, res)
+                return
+            except Exception as e:
+                log.error("could not build %s branch: %s", name, e)
+                if attempt is desc and " ! tee " in desc:
+                    log.warning("retrying %s without the live-snapshot branch", name)
 
     def _build(self, path: str):
         ext = os.path.splitext(path)[1].lower()

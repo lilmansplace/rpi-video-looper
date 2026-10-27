@@ -315,17 +315,20 @@ class Controller:
         if str(pc.get("backend", "gstreamer")).lower() == "gstreamer":
             from . import gstplayer
             if gstplayer.Gst is not None:
-                return gstplayer.GstPlayer(pc, None, self._on_mpv_event)
+                sc = self.cfg.section("snapshot")
+                snap = {"path": self.snapshot_path, "interval": self.cfg.get("snapshot_interval"),
+                        "width": sc.get("width"), "quality": sc.get("quality")}
+                return gstplayer.GstPlayer(pc, None, self._on_mpv_event, snapshot=snap)
             log.warning("GStreamer bindings not installed; falling back to mpv")
         return MpvPlayer(pc, os.path.join(RUN_DIR, "mpv.sock"), self._on_mpv_event)
 
     def _snapshot_method(self) -> str:
         sc = self.cfg.section("snapshot")
         m = str(sc.get("method", "auto")).lower()
-        if m in ("file", "player"):
+        if m in ("file", "player", "live"):
             return m
         if self.player.__class__.__name__ == "GstPlayer":
-            return "file"
+            return "live"  # the GStreamer player writes a live JPEG straight off the decoded frames
         hw = str(self.cfg.section("player").get("hwdec", "")).lower()
         zero_copy = hw not in ("", "no") and not hw.endswith("-copy") and hw != "auto-safe"
         return "file" if zero_copy else "player"
@@ -334,7 +337,18 @@ class Controller:
         if self.state["status"] != "playing" or not self.state["file"] or self.overlay:
             return
         sc = self.cfg.section("snapshot")
-        if self._snapshot_method() == "player":
+        method = self._snapshot_method()
+        if method == "live":
+            # the GStreamer pipeline writes snapshot.jpg itself from the decoded frames;
+            # nothing to decode here -- just reflect how fresh the file is.
+            try:
+                mt = int(os.stat(self.snapshot_path).st_mtime)
+            except OSError:
+                return
+            if mt != self.state.get("snapshot_time"):
+                self._set("snapshot", snapshot_time=mt)
+            return
+        if method == "player":
             raw = os.path.join(RUN_DIR, "raw.jpg")
             if self.player.screenshot(raw) and snapshot.shrink(raw, self.snapshot_path, sc["width"], sc["quality"]):
                 self._set("snapshot", snapshot_time=int(time.time()))
