@@ -107,6 +107,25 @@ def _card(title: str, lines: list[tuple[str, tuple, int, bool]], qr: tuple[str, 
     return img
 
 
+def _nomedia_idle():
+    """Near-black screen with a small crossed-out USB mark in a corner, so a drive that drops
+    mid-show doesn't wash the room out with a big message -- just a quiet hint for whoever looks."""
+    img = Image.new("RGB", (W, H), BG)
+    d = ImageDraw.Draw(img)
+    col = MUTE
+    cx, cy = W - 100, H - 100  # bottom-right corner
+    # a little USB stick: body + metal connector + end cap
+    d.rectangle([cx - 16, cy - 9, cx + 16, cy + 9], outline=col, width=3)  # body
+    d.rectangle([cx - 28, cy - 6, cx - 16, cy + 6], outline=col, width=3)  # connector
+    d.line([cx + 16, cy, cx + 26, cy], fill=col, width=3)                  # end cap
+    # universal "no" ring + slash drawn over it
+    r = 46
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=col, width=5)
+    off = int(r * 0.7071)
+    d.line([cx - off, cy - off, cx + off, cy + off], fill=col, width=5)
+    return img
+
+
 def render(state: dict, path: str) -> bool:
     """Draw the screen for a network/setup state. Returns False if it can't be drawn."""
     if Image is None or qrcode is None:
@@ -133,6 +152,17 @@ def render(state: dict, path: str) -> bool:
             img = _card("Connecting…", [(f"Joining “{state.get('network', '')}”", FG, 36, False),
                                            ("", FG, 20, False),
                                            ("This takes up to a minute.", MUTE, 30, False)])
+        elif mode == "nomedia":
+            # Deliberately shows no network name, address or QR code: a decoration shouldn't
+            # broadcast how to get onto its network / control it just because the drive is out.
+            if state.get("phase") == "idle":
+                img = _nomedia_idle()  # after a few seconds: just a quiet corner mark
+            else:
+                img = _card("Insert a USB drive", [
+                    ("Please load a USB drive with video files.", FG, 36, False),
+                    ("", FG, 20, False),
+                    ("H.264 MP4 plays best — up to 1080p at 30fps.", MUTE, 28, False),
+                ], footer="Video Looper")
         elif mode == "online":
             url = f"http://{state.get('ip')}:{state.get('web_port', 8080)}/"
             lines = [(f"Connected to “{state.get('network') or 'your network'}”", FG, 34, False),

@@ -144,6 +144,9 @@ write_boot_file "$BOOT/config.txt" "$cfg"
 
 line="$(head -n1 "$BACK/cmdline.txt" | tr -d '\r')"
 line="$(printf '%s' "$line" | sed -E 's/ cloud-init=enabled//g; s/ systemd\.mask=[^ ]*//g')"
+# Move the console off the display: otherwise ext4's "recovering journal" and a parked
+# cursor land on the projector during boot (looks broken). Now it stays clean until video.
+line="$(printf '%s' "$line" | sed -E 's/\bconsole=tty1\b/console=tty3/')"
 for opt in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0; do
   key="${opt%%=*}"
   line="$(printf ' %s ' "$line" | sed -E "s/ ${key//./\\.}(=[^ ]*)? / /g" | sed -E 's/^ +| +$//g')"

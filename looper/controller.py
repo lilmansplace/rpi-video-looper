@@ -36,6 +36,7 @@ def _read(path: str, default: str = "") -> str:
 NET_STATE = os.environ.get("LOOPER_NET_STATE", "/run/looper-net/state.json")
 NAV_CMDS = {"next", "previous", "restart", "jump", "toggle_pause", "play", "pause", "seek", "stop"}
 ANNOUNCE_SECS = 30
+NOMEDIA_FULL_SECS = 10  # show the "insert a USB drive" message this long, then just a corner icon
 
 
 _cpu_prev: list = []
@@ -123,6 +124,7 @@ class Controller:
         self.net: dict = {}
         self._net_mtime = None
         self._snapshot_for: str | None = None  # file we already have a still for (videos loop)
+        self._nomedia_since: float | None = None  # when the "no USB" state began (for the 10s message)
 
     # ---------- public API (thread-safe) ----------
     def submit(self, cmd: str, arg=None) -> None:
@@ -408,12 +410,16 @@ class Controller:
         if mode == "online" and n.get("announce") and time.time() - n.get("t", 0) < ANNOUNCE_SECS:
             return f"online:{n.get('t')}", {**n, "web_port": port, "mqtt": self._mqtt_line()}
         if self.state["status"] == "no_media":
-            ip = ip or local_ip()
-            if ip:
-                return f"nomedia:{ip}", {"mode": "online", "ip": ip, "network": n.get("network"),
-                                          "web_port": port, "title": "No videos found",
-                                          "note": "Copy H.264 MP4 videos onto a USB drive and plug it in.",
-                                          "mqtt": self._mqtt_line()}
+            # A decoration left with no USB shouldn't broadcast its network name, IP, control
+            # URL or a QR code to the whole room -- just ask for a drive. (The address is still
+            # shown during onboarding and briefly right after it first connects.)
+            if self._nomedia_since is None:
+                self._nomedia_since = time.monotonic()
+            # Full message for a few seconds, then a quiet corner icon so a dropped drive
+            # mid-show doesn't wash the room out with a big screen of text.
+            phase = "full" if time.monotonic() - self._nomedia_since < NOMEDIA_FULL_SECS else "idle"
+            return f"nomedia:{phase}", {"mode": "nomedia", "phase": phase}
+        self._nomedia_since = None
         return None, None
 
     def _mqtt_line(self) -> str | None:
