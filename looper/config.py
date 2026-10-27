@@ -46,7 +46,8 @@ DEFAULTS: dict = {
         # (wrong codec, 4K, 60 fps...). Off = play them anyway, but still warn.
         "skip_incompatible": False,
         # Wait (up to this many seconds) for boot work to finish before starting video.
-        "boot_settle_max": 300,
+        # "auto": wait only while cloud-init still runs at boot (fresh Imager installs).
+        "boot_settle_max": "auto",
     },
     "player": {
         # "gstreamer": hardware H.264 decode straight onto a display plane. Measured on a

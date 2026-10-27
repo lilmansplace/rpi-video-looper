@@ -17,7 +17,7 @@ import subprocess
 import threading
 import time
 
-from . import __version__, compat, screens, sdnotify, snapshot
+from . import __version__, compat, sdnotify, snapshot  # screens (PIL, qrcode) loads on first use
 from .config import RUN_DIR, Config
 from .player import MpvPlayer, PlayerError
 from .playlist import Playlist, scan, title_of
@@ -412,6 +412,7 @@ class Controller:
                 self._play(self.playlist.current or self.playlist.next())
             return
         path = os.path.join(RUN_DIR, "screen.png")
+        from . import screens  # deferred: Pillow + qrcode cost seconds to import on a Pi Zero
         if screens.render(st, path):
             try:
                 self.player.play(path)
@@ -529,8 +530,13 @@ class Controller:
         everything (screen, SSH, Wi-Fi) for minutes. Wait until systemd says boot is done
         and the load has calmed down, up to playback.boot_settle_max seconds.
         """
-        max_wait = int(os.environ.get("LOOPER_BOOT_SETTLE",
-                                      self.cfg.section("playback").get("boot_settle_max", 300)) or 0)
+        setting = os.environ.get("LOOPER_BOOT_SETTLE", self.cfg.section("playback").get("boot_settle_max", "auto"))
+        if str(setting).lower() == "auto":
+            # Only needed while cloud-init still runs at every boot (fresh Imager installs).
+            # After tools/lean.sh it's off and the video can start straight away.
+            cloud_off = not os.path.isdir("/etc/cloud") or os.path.exists("/etc/cloud/cloud-init.disabled")
+            setting = 0 if cloud_off else 300
+        max_wait = int(setting or 0)
         if max_wait <= 0:
             return
         sdnotify.notify("READY=1")  # web UI is up; don't hold up the boot itself

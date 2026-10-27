@@ -6,6 +6,8 @@ import logging
 import os
 import signal
 import sys
+import threading
+import time
 
 from .config import Config
 from .controller import Controller
@@ -29,14 +31,27 @@ def main() -> int:
         except Exception:
             log.exception("web UI failed to start (playback continues)")
 
-    mq = None
-    try:
-        from .mqtt_auto import MqttManager
-        mq = MqttManager(cfg, ctl)
-        ctl.mqtt_manager = mq
-        mq.start()
-    except Exception:
-        log.exception("MQTT failed to start (playback continues)")
+    holder: dict = {}
+
+    def start_mqtt():
+        # Started after the video is up: paho + the broker search would otherwise
+        # delay the first frame by several seconds on a Pi Zero.
+        for _ in range(60):
+            if ctl.state.get("status") not in ("starting",) or not ctl._running:
+                break
+            time.sleep(1)
+        if not ctl._running:
+            return
+        try:
+            from .mqtt_auto import MqttManager
+            mq = MqttManager(cfg, ctl)
+            ctl.mqtt_manager = mq
+            holder["mq"] = mq
+            mq.start()
+        except Exception:
+            log.exception("MQTT failed to start (playback continues)")
+
+    threading.Thread(target=start_mqtt, name="mqtt-start", daemon=True).start()
 
     def stop(*_):
         ctl.shutdown()
@@ -46,8 +61,8 @@ def main() -> int:
     try:
         ctl.run()
     finally:
-        if mq:
-            mq.stop()
+        if holder.get("mq"):
+            holder["mq"].stop()
     return 0
 
 

@@ -16,14 +16,22 @@ import subprocess
 
 log = logging.getLogger(__name__)
 
-try:
-    from PIL import Image
-except ImportError:  # snapshots still work, just full size
-    Image = None
+Image = None  # Pillow is imported on first use (it's slow to import on a Pi Zero)
+
+
+def _pil():
+    global Image
+    if Image is None:
+        try:
+            from PIL import Image as _Image
+            Image = _Image
+        except ImportError:  # snapshots still work, just full size
+            return None
+    return Image
 
 
 def shrink(src: str, dst: str, width: int, quality: int) -> bool:
-    if Image is None:
+    if _pil() is None:
         os.replace(src, dst)
         return True
     try:
