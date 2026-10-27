@@ -43,6 +43,9 @@ else
   rm -rf "$APP"; git clone -q --depth 1 -b "$BRANCH" "$REPO_URL" "$APP"
 fi
 find "$APP" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+# Precompile to .pyc now so the first boot (and every boot) skips byte-compiling the whole
+# package. On a single-core Pi Zero W this shaves seconds off time-to-first-frame.
+python3 -m compileall -q "$APP/looper" >/dev/null 2>&1 || true
 
 echo "==> Service user"
 if id looper >/dev/null 2>&1; then
@@ -61,6 +64,15 @@ else
 fi
 usermod -aG video,render,audio,input looper
 mkdir -p /var/lib/looper && chown looper:looper /var/lib/looper
+
+echo "==> Prebuilding the GStreamer plugin registry (so cold boot skips the plugin scan)"
+# Built as 'looper' and world-readable so the service (User=looper, GST_REGISTRY_UPDATE=no)
+# finds it. If this can't run now (e.g. inside an image-build chroot), the service's
+# ExecStartPre rebuilds it on first start instead.
+runuser -u looper -- env GST_REGISTRY=/var/lib/looper/gst-registry.bin GST_REGISTRY_UPDATE=yes \
+  python3 -c 'import gi; gi.require_version("Gst", "1.0"); from gi.repository import Gst; Gst.init(None)' \
+  >/dev/null 2>&1 || echo "    note: couldn't prebuild the registry now; it builds on first start"
+[ -s /var/lib/looper/gst-registry.bin ] && chmod 0644 /var/lib/looper/gst-registry.bin || true
 
 echo "==> Config file at $BOOT/looper.toml"
 if [ -f "$BOOT/looper.toml" ] && ! grep -q '^\[device\]' "$BOOT/looper.toml"; then

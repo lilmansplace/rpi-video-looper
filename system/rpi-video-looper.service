@@ -13,8 +13,18 @@ User=looper
 Group=looper
 SupplementaryGroups=video render audio input
 WorkingDirectory=/opt/rpi-video-looper
-Environment=PYTHONDONTWRITEBYTECODE=1
+# .pyc are precompiled at install time (see install.sh); let Python use them so every
+# boot doesn't re-byte-compile the whole package on a single-core Pi.
 Environment=PYTHONUNBUFFERED=1
+# Pin GStreamer's plugin registry to a prebuilt file (built by install.sh, or by the
+# ExecStartPre below if it is ever missing) so cold boot skips the full plugin scan. That
+# scan cost seconds AND raced the first pipeline on a Zero (intermittent "no element
+# v4l2h264dec"). UPDATE=no means a GStreamer package upgrade needs a re-run of install.sh.
+Environment=GST_REGISTRY=/var/lib/looper/gst-registry.bin
+Environment=GST_REGISTRY_UPDATE=no
+# Safety net: build the registry once if it is missing (this boot pays the scan; later
+# boots take the fast UPDATE=no path). Uses python3-gi, already a dependency.
+ExecStartPre=/bin/sh -c 'test -s "$GST_REGISTRY" || GST_REGISTRY_UPDATE=yes python3 -c "import gi; gi.require_version(\"Gst\", \"1.0\"); from gi.repository import Gst; Gst.init(None)" >/dev/null 2>&1 || true'
 ExecStart=/usr/bin/python3 -m looper
 RuntimeDirectory=looper
 StateDirectory=looper

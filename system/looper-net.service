@@ -7,7 +7,6 @@ After=NetworkManager.service local-fs.target
 Type=simple
 ExecStart=/usr/bin/python3 -m looper.netsetup
 WorkingDirectory=/opt/rpi-video-looper
-Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 RuntimeDirectory=looper-net
 RuntimeDirectoryMode=0755

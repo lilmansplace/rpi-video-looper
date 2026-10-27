@@ -122,6 +122,7 @@ class Controller:
         self.overlay: str | None = None  # key of the info screen being shown instead of video
         self.net: dict = {}
         self._net_mtime = None
+        self._snapshot_for: str | None = None  # file we already have a still for (videos loop)
 
     # ---------- public API (thread-safe) ----------
     def submit(self, cmd: str, arg=None) -> None:
@@ -341,14 +342,19 @@ class Controller:
         # file method: run off the main thread so controls never wait on ffmpeg
         if getattr(self, "_snap_thread", None) and self._snap_thread.is_alive():
             return
-        if not shutil.which("ffmpeg") or not self.playlist.current:
+        video = self.playlist.current
+        if not shutil.which("ffmpeg") or not video:
             return
+        if self._snapshot_for == video:
+            return  # videos loop, so one still per file is enough: decoding a 1080p keyframe in
+            # software every interval pegged the single core and stuttered playback
         if cpu_busy() > 85:  # Pi is busy: a snapshot can wait, playback can't
             return
-        video, pos = self.playlist.current, float(self.player.get("time-pos", self.state["position"]) or 0)
+        pos = float(self.player.get("time-pos", self.state["position"]) or 0)
 
         def work():
             if snapshot.ffmpeg_grab(video, pos, self.snapshot_path, sc["width"]):
+                self._snapshot_for = video
                 self._set("snapshot", snapshot_time=int(time.time()))
 
         self._snap_thread = threading.Thread(target=work, name="snapshot", daemon=True)

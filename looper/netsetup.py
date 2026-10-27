@@ -44,6 +44,9 @@ FIRST_WAIT = 180  # seconds to wait for a saved network at boot before the hotsp
 NO_PROFILE_WAIT = 10  # ... when there is no saved Wi-Fi at all
 DROPOUT_WAIT = 300  # a working network vanished: wait this long before the hotspot
 RETRY_EVERY = 300  # while the hotspot is up and nobody is on it, retry saved Wi-Fi
+ONLINE_POLL = 30  # once connected, only re-check for a dropout this often. Each check forks
+# nmcli twice (~1.2s of CPU on a Pi Zero W); polling every 2s stole most of a core from video.
+LINK_POLL = 3  # while still trying to get online, check more eagerly
 
 
 # ---------------------------------------------------------------- helpers
@@ -442,12 +445,13 @@ class NetSetup:
             self.nm.try_saved(40)
         has_saved = bool(self.nm.saved_wifi())
         deadline = time.monotonic() + (FIRST_WAIT if has_saved else NO_PROFILE_WAIT)
-        mode, offline_since, next_retry = "starting", None, 0.0
+        mode, offline_since, next_retry, next_poll = "starting", None, 0.0, 0.0
         while True:
             try:
                 form = self.actions.get(timeout=2)
                 self.handle_submit(form)
                 mode = self.state["mode"]
+                next_poll = 0.0  # re-probe connectivity right away after a change
                 if mode == "setup":
                     next_retry = time.monotonic() + RETRY_EVERY
                 continue
@@ -465,6 +469,11 @@ class NetSetup:
                     self.start_hotspot(self.state.get("error"))
                     next_retry = time.monotonic() + RETRY_EVERY
                 continue
+            # Rate-limit the nmcli connectivity probe: forking nmcli every 2s burned most of
+            # a core. Once online we only need to notice a dropout within DROPOUT_WAIT.
+            if now < next_poll:
+                continue
+            next_poll = now + (ONLINE_POLL if mode == "online" else LINK_POLL)
             ip = self.nm.online()
             if ip:
                 if mode != "online" or self.state.get("ip") != ip:
