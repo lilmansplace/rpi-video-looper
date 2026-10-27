@@ -66,13 +66,14 @@ DEFAULTS: dict = {
         "extra_args": ["--gpu-hwdec-interop=drmprime"],
     },
     "snapshot": {
-        "interval": 30,  # seconds; 0 = off
+        "interval": 5,  # seconds between refreshes of the "now playing" preview; 0 = off
         "width": 480,
         "quality": 70,
-        # "file": ffmpeg decodes one keyframe from the video file in the background
-        #         (never touches the display). "player": ask mpv (froze the HDMI output
-        #         on a Pi Zero W with zero-copy decoding). "auto": "file" when the
-        #         player uses zero-copy hwdec, else "player".
+        # "live": the GStreamer player writes a JPEG straight off the frames it already
+        #         decoded for the screen (near-free; the default for that backend).
+        #         "file": ffmpeg decodes one keyframe from the file in the background.
+        #         "player": ask mpv (froze the HDMI output on a Pi Zero W with zero-copy
+        #         decoding). "auto": "live" on GStreamer, else "file"/"player" by hwdec.
         "method": "auto",
     },
     "status": {

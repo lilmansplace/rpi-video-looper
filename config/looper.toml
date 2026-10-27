@@ -49,10 +49,10 @@ video_sink = "kmssink driver-name=vc4 force-modesetting=false"
 hw_decoder = "v4l2h264dec capture-io-mode=dmabuf"
 
 [snapshot]
-interval = 30                   # seconds between snapshots (0 = off)
+interval = 5                    # seconds between refreshes of the "now playing" preview (0 = off)
 width = 480
 quality = 70
-method = "auto"                 # "file" (ffmpeg, background) | "player" (mpv) | "auto"
+method = "auto"                 # "auto" | "live" (GStreamer, off the decoded frames) | "file" (ffmpeg) | "player" (mpv)
 
 [status]
 position_interval = 10          # how often the playback position is published
