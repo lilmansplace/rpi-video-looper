@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 
 from .player import PlayerError
 
@@ -55,8 +56,25 @@ class GstPlayer:
         Gst.init(None)
         if not Gst.ElementFactory.find(self.cfg.get("video_sink", DEFAULT_SINK).split()[0]):
             raise PlayerError(f"GStreamer element {self.cfg.get('video_sink', DEFAULT_SINK).split()[0]} missing")
+        if str(self.cfg.get("hwdec", "v4l2m2m")).lower() not in ("no", ""):
+            self._await_decoder()
         self._alive = True
         log.info("GStreamer %s ready (sink: %s)", Gst.version_string(), self.cfg.get("video_sink", DEFAULT_SINK))
+
+    def _await_decoder(self, timeout: float = 12.0) -> None:
+        """On a cold boot the V4L2 codec (/dev/video10) may not be probed yet, so a freshly
+        made v4l2h264dec exists but lacks its device properties (capture-io-mode) and the
+        pipeline fails to build. Wait until the decoder is ready so the first video is clean."""
+        dec = (self.cfg.get("hw_decoder") or DEFAULT_HW).split()[0]
+        if not dec.startswith("v4l2"):
+            return  # only the V4L2 codec has the device-probe race; software decoders don't
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            el = Gst.ElementFactory.make(dec, None)
+            if el is not None and el.find_property("capture-io-mode") is not None:
+                return
+            time.sleep(0.5)
+        log.warning("%s not fully ready after %.0fs; starting anyway", dec, timeout)
 
     def alive(self) -> bool:
         return self._alive

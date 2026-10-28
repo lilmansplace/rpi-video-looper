@@ -68,6 +68,9 @@ class FakeNM:
     def stations(self):
         return 0
 
+    def mac(self):
+        return "b8:27:eb:00:44:e0"
+
 
 class FakeSystem:
     def __init__(self):
@@ -150,6 +153,7 @@ class SeedFileTests(unittest.TestCase):
         svc, boot = make_svc('[wifi]\nssid = "Home"\npassword = "hunter2222"\ncountry = "GB"\n'
                              '[device]\nname = "Porch Looper"\n')
         self.assertTrue(svc.apply_seed_files())
+        svc.ensure_hostname()
         self.assertIn(("add", "Home", "hunter2222", False), svc.nm.calls)
         self.assertIn(("country", "GB"), svc.sys.calls)
         self.assertIn(("hostname", "Porch Looper"), svc.sys.calls)
@@ -159,6 +163,16 @@ class SeedFileTests(unittest.TestCase):
         svc.nm.calls.clear()
         self.assertFalse(svc.apply_seed_files())  # scrubbed file: not re-added with an empty password
         self.assertEqual([c for c in svc.nm.calls if c[0] == "add"], [])
+
+    def test_default_hostname_has_mac_suffix(self):
+        svc, _ = make_svc("")  # no [device] name chosen
+        svc.ensure_hostname()
+        self.assertIn(("hostname", "looper-44e0"), svc.sys.calls)  # from FakeNM.mac() ...00:44:e0
+
+    def test_chosen_name_wins_over_mac_suffix(self):
+        svc, _ = make_svc('[device]\nname = "Garage"\n')
+        svc.ensure_hostname()
+        self.assertIn(("hostname", "Garage"), svc.sys.calls)
 
     def test_new_password_is_applied(self):
         svc, boot = make_svc('[wifi]\nssid = "Home"\npassword = "hunter2222"\n')

@@ -16,7 +16,10 @@ country = "US"                  # two-letter code; needed for Wi-Fi to work
 hidden = false
 
 [device]
-name = "Video Looper"           # shown in Home Assistant and used as the hostname
+# Shown in Home Assistant and used for the hostname. Left as "Video Looper", each board
+# gets a unique suffix from its MAC (e.g. "Video Looper 44E0", hostname looper-44e0) so
+# multiple loopers don't collide. Set your own name here to override it.
+name = "Video Looper"
 
 # Remote login for user "looper". Off unless you set a password here.
 # [ssh]

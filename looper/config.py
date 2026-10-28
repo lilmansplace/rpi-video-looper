@@ -174,6 +174,28 @@ def slug(name: str) -> str:
     return out or "looper"
 
 
+def mac_suffix(n: int = 4) -> str:
+    """Last n hex chars of a hardware MAC (wlan0 preferred), lowercase. Used to make each
+    looper's default name/hostname/MQTT id unique so several don't collide. Matches the
+    setup hotspot's suffix (Looper-Setup-XXXX), so one looper looks the same everywhere."""
+    for iface in ("wlan0", "eth0"):
+        try:
+            with open(f"/sys/class/net/{iface}/address") as f:
+                mac = f.read().strip().replace(":", "")
+            if len(mac) >= n and mac.strip("0"):
+                return mac[-n:].lower()
+        except OSError:
+            continue
+    try:  # fall back to the machine id if there is no network device yet
+        with open("/etc/machine-id") as f:
+            mid = f.read().strip()
+        if len(mid) >= n:
+            return mid[-n:].lower()
+    except OSError:
+        pass
+    return ""
+
+
 def save_setup(state_dir: str, section: str, values: dict) -> None:
     """Merge values into setup.json (used by the setup portal and web UI)."""
     path = os.path.join(state_dir, "setup.json")
@@ -221,7 +243,16 @@ class Config:
         if usb:
             log.info("using settings from %s", usb)
             _merge(self.data, read_toml(usb))
-        m, name = self.data["mqtt"], self.data["device"].get("name") or "Video Looper"
+        m, dev = self.data["mqtt"], self.data["device"]
+        custom = (dev.get("name") or "").strip()
+        if not custom or custom == DEFAULTS["device"]["name"]:
+            # No chosen name: append this board's MAC suffix so multiple loopers don't all
+            # show up as "Video Looper"/"looper" and collide in Home Assistant and on mDNS.
+            sfx = mac_suffix()
+            name = DEFAULTS["device"]["name"] + (f" {sfx.upper()}" if sfx else "")
+        else:
+            name = custom
+        dev["name"] = name
         m["name"] = m.get("name") or name
         m["node_id"] = m.get("node_id") or slug(name)
         if os.path.exists(self.settings_path):

@@ -87,6 +87,17 @@ mkdir -p /media/usb
 sed -i '\#/media/usb#d' /etc/fstab
 echo "/dev/sda1 /media/usb auto ro,nofail,noatime,x-systemd.automount,x-systemd.device-timeout=3s,x-systemd.mount-timeout=10s 0 0" >> /etc/fstab
 
+echo "==> HDMI: force the display output on (a projector off/undetected at boot still plays)"
+# A video looper always drives a display. On a Pi Zero the HDMI can read 'disconnected' at
+# boot and not recover without a reboot; force the connector enabled. The mode still comes
+# from the display's EDID, so any-resolution projectors/TVs work. Written atomically.
+if [ -f "$BOOT/cmdline.txt" ] && ! grep -q 'video=HDMI-A-1:' "$BOOT/cmdline.txt"; then
+  cl="$(head -n1 "$BOOT/cmdline.txt" | tr -d '\r') video=HDMI-A-1:e"
+  printf '%s\n' "$cl" > "$BOOT/cmdline.txt.looper-tmp"
+  sync && mv -f "$BOOT/cmdline.txt.looper-tmp" "$BOOT/cmdline.txt" && sync
+  echo "    added video=HDMI-A-1:e to cmdline.txt"
+fi
+
 echo "==> Installing services"
 install -m 644 "$APP/system/rpi-video-looper.service" /etc/systemd/system/
 install -m 644 "$APP/system/rpi-video-looper.timer" /etc/systemd/system/

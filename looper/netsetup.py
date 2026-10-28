@@ -339,9 +339,6 @@ class NetSetup:
                         new_wifi = True
                     except RuntimeError as e:
                         log.error("%s", e)
-            name = (cfg.get("device") or {}).get("name")
-            if name and name != DEFAULTS["device"]["name"]:  # keep the hostname unless renamed
-                self.sys.set_hostname(name)
             ssh = cfg.get("ssh") or {}
             if "enabled" in ssh or ssh.get("password"):
                 skey = hashlib.sha256(json.dumps(ssh, sort_keys=True).encode()).hexdigest()
@@ -362,6 +359,22 @@ class NetSetup:
         except OSError:
             pass
         return new_wifi
+
+    def ensure_hostname(self) -> None:
+        """Give the looper a stable, unique-ish hostname: the chosen device name if set,
+        otherwise looper-<mac> so several loopers don't all answer to 'looper'. The suffix
+        matches the setup hotspot (Looper-Setup-XXXX)."""
+        boot = read_toml(self.boot_path)
+        media = {**DEFAULTS["media"], **boot.get("media", {})}
+        usb_path = usb_config_path(media)
+        usb = read_toml(usb_path) if usb_path else {}
+        name = ((usb.get("device") or {}).get("name")
+                or (boot.get("device") or {}).get("name") or "").strip()
+        if name and name != DEFAULTS["device"]["name"]:
+            self.sys.set_hostname(name)
+        else:
+            sfx = self.nm.mac().replace(":", "")[-4:].lower()
+            self.sys.set_hostname(f"looper-{sfx}" if sfx and sfx.strip("0") else "looper")
 
     # ----- portal submissions
     def handle_submit(self, form: dict) -> None:
@@ -441,6 +454,10 @@ class NetSetup:
             new = self.apply_seed_files()
         except Exception:
             log.exception("could not apply looper.toml network settings")
+        try:
+            self.ensure_hostname()
+        except Exception:
+            log.exception("could not set hostname")
         if new:
             self.nm.try_saved(40)
         has_saved = bool(self.nm.saved_wifi())
