@@ -115,6 +115,18 @@ class NetworkManager:
                 return d[0]
         return None
 
+    def has_wifi(self) -> bool:
+        """Is there any Wi-Fi adapter at all? A non-W Pi Zero has none. Reads sysfs directly so
+        it's reliable even before NetworkManager has settled."""
+        try:
+            for iface in os.listdir("/sys/class/net"):
+                if os.path.exists(f"/sys/class/net/{iface}/wireless") \
+                        or os.path.exists(f"/sys/class/net/{iface}/phy80211"):
+                    return True
+        except OSError:
+            pass
+        return False
+
     def online(self) -> str | None:
         """IP address if connected to a real network (not our hotspot)."""
         rc, out = self.nm("-t", "-f", "NAME,TYPE,DEVICE", "connection", "show", "--active")
@@ -445,19 +457,33 @@ class NetSetup:
             self.portal.server_close()
             self.portal = None
 
+    def _run_offline(self) -> None:
+        """No Wi-Fi: publish a benign 'offline' state (which draws no setup screen, so the
+        projector just shows video) and idle. The looper plays from the USB looper.toml."""
+        log.info("no Wi-Fi adapter; running offline (video plays, configure via USB looper.toml)")
+        self.publish(mode="offline")
+        while True:
+            time.sleep(3600)
+
     # ----- main loop
     def run(self) -> None:
         run(["rfkill", "unblock", "wifi"], 5)
         self.publish(mode="starting")
+        try:
+            self.ensure_hostname()
+        except Exception:
+            log.exception("could not set hostname")
+        # No Wi-Fi hardware (e.g. a non-W Pi Zero): there is nothing to connect to or set up.
+        # Stand down quietly instead of flailing at a hotspot that can't exist, so the video
+        # just plays -- configure it with a looper.toml on the USB drive.
+        if not self.nm.has_wifi():
+            self._run_offline()
+            return
         new = False
         try:
             new = self.apply_seed_files()
         except Exception:
             log.exception("could not apply looper.toml network settings")
-        try:
-            self.ensure_hostname()
-        except Exception:
-            log.exception("could not set hostname")
         if new:
             self.nm.try_saved(40)
         has_saved = bool(self.nm.saved_wifi())

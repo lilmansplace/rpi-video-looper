@@ -71,6 +71,9 @@ class FakeNM:
     def mac(self):
         return "b8:27:eb:00:44:e0"
 
+    def has_wifi(self):
+        return True
+
 
 class FakeSystem:
     def __init__(self):
@@ -173,6 +176,15 @@ class SeedFileTests(unittest.TestCase):
         svc, _ = make_svc('[device]\nname = "Garage"\n')
         svc.ensure_hostname()
         self.assertIn(("hostname", "Garage"), svc.sys.calls)
+
+    def test_no_wifi_adapter_stands_down(self):
+        # a non-W Pi Zero: no Wi-Fi device -> run offline, never start a hotspot
+        svc, _ = make_svc("")
+        svc.nm.has_wifi = lambda: False
+        svc._run_offline = lambda: setattr(svc, "_offline", True)  # don't idle forever in the test
+        svc.run()
+        self.assertTrue(getattr(svc, "_offline", False))
+        self.assertEqual([c for c in svc.nm.calls if c[0] == "ap"], [])  # no hotspot attempt
 
     def test_new_password_is_applied(self):
         svc, boot = make_svc('[wifi]\nssid = "Home"\npassword = "hunter2222"\n')

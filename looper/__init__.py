@@ -1,3 +1,3 @@
 """rpi-video-looper: a lightweight video looper for the Raspberry Pi Zero W."""
 
-__version__ = "0.7.0"
+__version__ = "0.7.1"
