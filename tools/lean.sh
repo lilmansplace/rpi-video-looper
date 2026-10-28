@@ -144,9 +144,9 @@ write_boot_file "$BOOT/config.txt" "$cfg"
 
 line="$(head -n1 "$BACK/cmdline.txt" | tr -d '\r')"
 line="$(printf '%s' "$line" | sed -E 's/ cloud-init=enabled//g; s/ systemd\.mask=[^ ]*//g')"
-# Move the console off the display: otherwise ext4's "recovering journal" and a parked
-# cursor land on the projector during boot (looks broken). Now it stays clean until video.
-line="$(printf '%s' "$line" | sed -E 's/\bconsole=tty1\b/console=tty3/')"
+# Console to the serial port only: no boot text on any display VT, so nothing but the
+# looper splash and the video reach the projector (fbcon is unbound by a udev rule too).
+line="$(printf '%s' "$line" | sed -E 's/ console=tty[0-9]+//g')"
 for opt in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 video=HDMI-A-1:e; do
   key="${opt%%=*}"
   line="$(printf ' %s ' "$line" | sed -E "s/ ${key//./\\.}(=[^ ]*)? / /g" | sed -E 's/^ +| +$//g')"

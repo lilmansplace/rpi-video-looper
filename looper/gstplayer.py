@@ -58,10 +58,11 @@ class GstPlayer:
             raise PlayerError(f"GStreamer element {self.cfg.get('video_sink', DEFAULT_SINK).split()[0]} missing")
         if str(self.cfg.get("hwdec", "v4l2m2m")).lower() not in ("no", ""):
             self._await_decoder()
+        self._await_display()
         self._alive = True
         log.info("GStreamer %s ready (sink: %s)", Gst.version_string(), self.cfg.get("video_sink", DEFAULT_SINK))
 
-    def _await_decoder(self, timeout: float = 12.0) -> None:
+    def _await_decoder(self, timeout: float = 30.0) -> None:
         """On a cold boot the V4L2 codec (/dev/video10) may not be probed yet, so a freshly
         made v4l2h264dec exists but lacks its device properties (capture-io-mode) and the
         pipeline fails to build. Wait until the decoder is ready so the first video is clean."""
@@ -75,6 +76,27 @@ class GstPlayer:
                 return
             time.sleep(0.5)
         log.warning("%s not fully ready after %.0fs; starting anyway", dec, timeout)
+
+    def _await_display(self, timeout: float = 90.0) -> None:
+        """Wait until the DRM display can be opened before kmssink tries. On a Pi Zero the vc4
+        driver can take ~60s to come up; going early fails with 'Could not open DRM module vc4'
+        and then retries, leaving a black gap. The boot splash covers this wait."""
+        if "kmssink" not in self.cfg.get("video_sink", DEFAULT_SINK):
+            return
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                cards = [c for c in os.listdir("/dev/dri") if c.startswith("card")]
+            except OSError:
+                cards = []
+            for c in cards:
+                try:
+                    os.close(os.open(f"/dev/dri/{c}", os.O_RDWR))
+                    return
+                except OSError:
+                    continue
+            time.sleep(0.5)
+        log.warning("DRM display not ready after %.0fs; starting anyway", timeout)
 
     def alive(self) -> bool:
         return self._alive

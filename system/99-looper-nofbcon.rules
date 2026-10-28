@@ -1,0 +1,4 @@
+# Keep console text off the projector. The framebuffer console (fbcon) renders a text VT
+# onto the display; unbind it the moment it appears so the kernel never draws boot text
+# there. Only the looper's boot splash (looper/fbsplash.py) and the video are shown.
+ACTION=="add", SUBSYSTEM=="vtconsole", ATTR{name}=="*frame buffer*", ATTR{bind}="0"

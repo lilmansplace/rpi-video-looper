@@ -1,0 +1,17 @@
+[Unit]
+Description=Video Looper boot splash (framebuffer)
+DefaultDependencies=no
+Conflicts=shutdown.target
+After=systemd-remount-fs.service
+Before=rpi-video-looper.service
+
+[Service]
+# Runs from early boot until vc4 takes the display over for video, then exits by itself.
+# The tool waits for the framebuffer, so starting before it exists is fine.
+Type=simple
+WorkingDirectory=/opt/rpi-video-looper
+ExecStart=/usr/bin/python3 -m looper.fbsplash
+Nice=5
+
+[Install]
+WantedBy=sysinit.target

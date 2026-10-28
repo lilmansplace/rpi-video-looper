@@ -87,26 +87,44 @@ mkdir -p /media/usb
 sed -i '\#/media/usb#d' /etc/fstab
 echo "/dev/sda1 /media/usb auto ro,nofail,noatime,x-systemd.automount,x-systemd.device-timeout=3s,x-systemd.mount-timeout=10s 0 0" >> /etc/fstab
 
-echo "==> HDMI: force the display output on (a projector off/undetected at boot still plays)"
-# A video looper always drives a display. On a Pi Zero the HDMI can read 'disconnected' at
-# boot and not recover without a reboot; force the connector enabled. The mode still comes
-# from the display's EDID, so any-resolution projectors/TVs work. Written atomically.
-if [ -f "$BOOT/cmdline.txt" ] && ! grep -q 'video=HDMI-A-1:' "$BOOT/cmdline.txt"; then
-  cl="$(head -n1 "$BOOT/cmdline.txt" | tr -d '\r') video=HDMI-A-1:e"
-  printf '%s\n' "$cl" > "$BOOT/cmdline.txt.looper-tmp"
-  sync && mv -f "$BOOT/cmdline.txt.looper-tmp" "$BOOT/cmdline.txt" && sync
-  echo "    added video=HDMI-A-1:e to cmdline.txt"
+echo "==> Clean boot: quiet kernel, HDMI forced on, no console text on the projector"
+# The kernel command line a projector appliance wants, set once and idempotently:
+#  - video=HDMI-A-1:e : force the HDMI connector on (mode still from the display's EDID) so a
+#                       projector that is off or not detected at boot still gets video.
+#  - console=serial0  : console to the serial port only -- no boot text on any display VT
+#                       (the framebuffer console is also unbound, see 99-looper-nofbcon.rules).
+#  - quiet/nologo/... : hush the kernel, hide the logo and cursor, no console blanking.
+# The boot splash (looper-splash.service -> looper/fbsplash.py) then paints the framebuffer.
+if [ -f "$BOOT/cmdline.txt" ]; then
+  orig="$(head -n1 "$BOOT/cmdline.txt" | tr -d '\r')"
+  cl="$(printf '%s' "$orig" | sed -E 's/ console=tty[0-9]+//g; s/ splash//g')"
+  for opt in quiet loglevel=3 logo.nologo vt.global_cursor_default=0 consoleblank=0 video=HDMI-A-1:e; do
+    key="${opt%%=*}"
+    cl="$(printf ' %s ' "$cl" | sed -E "s/ ${key//./\\.}(=[^ ]*)? / /g" | sed -E 's/^ +| +$//g')"
+    cl="$cl $opt"
+  done
+  if [ "$cl" != "$orig" ]; then
+    printf '%s\n' "$cl" > "$BOOT/cmdline.txt.looper-tmp"
+    sync && mv -f "$BOOT/cmdline.txt.looper-tmp" "$BOOT/cmdline.txt" && sync
+    echo "    cmdline: $cl"
+  fi
 fi
 
 echo "==> Installing services"
 install -m 644 "$APP/system/rpi-video-looper.service" /etc/systemd/system/
 install -m 644 "$APP/system/rpi-video-looper.timer" /etc/systemd/system/
 install -m 644 "$APP/system/looper-net.service" /etc/systemd/system/
+install -m 644 "$APP/system/looper-splash.service" /etc/systemd/system/
+# Boot splash on the framebuffer, console text kept off the display, and the H.264 codec
+# loaded early so the first video never races the decoder coming up.
+install -m 644 "$APP/system/99-looper-nofbcon.rules" /etc/udev/rules.d/99-looper-nofbcon.rules
+mkdir -p /etc/modules-load.d
+install -m 644 "$APP/system/modules-load.d/looper-codec.conf" /etc/modules-load.d/looper-codec.conf
 sysd daemon-reload
 # v0.1-v0.3 enabled the service directly (started mid-boot); now a timer starts it after boot
 rm -f /etc/systemd/system/multi-user.target.wants/rpi-video-looper.service
 mkdir -p /var/log/journal
-for unit in rpi-video-looper.timer looper-net.service NetworkManager.service avahi-daemon.service; do
+for unit in rpi-video-looper.timer looper-net.service looper-splash.service NetworkManager.service avahi-daemon.service; do
   sysd enable "$unit" >/dev/null 2>&1 || echo "    note: couldn't enable $unit (masked?)"
 done
 
