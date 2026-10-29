@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Persist a file onto the USB drive, which the looper mounts read-only so a power cut can't
+# corrupt it. We remount read-write only for the brief atomic write, then read-only again.
+# The looper runs this as root via sudo (install.sh adds a NOPASSWD rule). Content is on stdin:
+#   usb-write /media/usb/looper.toml < new-content
+set -uo pipefail
+
+TARGET="${1:?usage: usb-write <path under the USB mount>}"
+MNT="${LOOPER_USB_MNT:-/media/usb}"
+
+# Never write anywhere but inside the USB mount.
+case "$(readlink -f -- "$TARGET")" in
+  "$MNT"/*) : ;;
+  *) echo "usb-write: refusing to write outside $MNT: $TARGET" >&2; exit 1 ;;
+esac
+
+tmp="$(mktemp)" || exit 1
+cat > "$tmp"
+
+if ! mount -o remount,rw "$MNT" 2>/dev/null; then
+  echo "usb-write: could not remount $MNT read-write" >&2
+  rm -f "$tmp"; exit 1
+fi
+cleanup() { sync; mount -o remount,ro "$MNT" 2>/dev/null || true; rm -f "$tmp"; }
+trap cleanup EXIT
+
+dst="$TARGET.looper-tmp"
+cp -- "$tmp" "$dst" && sync && mv -f -- "$dst" "$TARGET" && sync

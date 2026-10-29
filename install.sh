@@ -128,6 +128,17 @@ for unit in rpi-video-looper.timer looper-net.service looper-splash.service Netw
   sysd enable "$unit" >/dev/null 2>&1 || echo "    note: couldn't enable $unit (masked?)"
 done
 
+echo "==> Let the looper persist settings to the USB drive (settings travel with the drive)"
+# A looper.toml on the USB is the state file: runtime changes are written back to it. The USB
+# is mounted read-only, so the looper runs this small helper as root (it remounts read-write
+# only for the atomic write, and only writes inside the USB mount).
+chmod +x "$APP/tools/usb-write" 2>/dev/null || true
+cat > /etc/sudoers.d/looper-usb <<SUDO
+looper ALL=(root) NOPASSWD: $APP/tools/usb-write
+SUDO
+chmod 0440 /etc/sudoers.d/looper-usb
+visudo -cf /etc/sudoers.d/looper-usb >/dev/null 2>&1 || { echo "    note: sudoers check failed; USB persist disabled"; rm -f /etc/sudoers.d/looper-usb; }
+
 echo "==> Setup hotspot: send every web address to the setup page (captive portal)"
 mkdir -p /etc/NetworkManager/dnsmasq-shared.d
 install -m 644 "$APP/system/captive-dns.conf" /etc/NetworkManager/dnsmasq-shared.d/looper-captive.conf

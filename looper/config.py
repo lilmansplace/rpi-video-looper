@@ -5,11 +5,12 @@ Layers, later wins:
   2. /boot/firmware/looper.toml   (editable from any PC by pulling the SD card)
   3. /var/lib/looper/setup.json   (written by the setup hotspot and the web UI's MQTT form)
   4. <thumb drive>/looper.toml    (drop one next to your videos to configure a looper)
-  5. /var/lib/looper/settings.json (playback tweaks made from the web UI / Home Assistant)
 
 [wifi] and [ssh] are handled by the network setup service (looper/netsetup.py).
 
-Only keys listed in TUNABLES can be changed at runtime.
+Only keys listed in TUNABLES can be changed at runtime. Those runtime changes persist to the
+USB looper.toml when a drive is present (created on first change) so they travel with the drive
+-- the drive is then authoritative; with no drive they persist to /var/lib/looper/settings.json.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ import copy
 import json
 import logging
 import os
+import re
+import subprocess
 import tempfile
 import tomllib
 
@@ -26,6 +29,9 @@ log = logging.getLogger(__name__)
 BOOT_CONFIG = os.environ.get("LOOPER_CONFIG", "/boot/firmware/looper.toml")
 STATE_DIR = os.environ.get("LOOPER_STATE_DIR", "/var/lib/looper")
 RUN_DIR = os.environ.get("LOOPER_RUN_DIR", "/run/looper")
+# Root helper that remounts the USB read-write, writes a file atomically and remounts it
+# read-only again, so runtime settings can persist to the drive (which is mounted read-only).
+USB_WRITE_HELPER = os.environ.get("LOOPER_USB_WRITE", "/opt/rpi-video-looper/tools/usb-write")
 
 DEFAULTS: dict = {
     "media": {
@@ -156,7 +162,7 @@ def read_toml(path: str) -> dict:
 
 
 def usb_config_path(media: dict) -> str | None:
-    """looper.toml on the thumb drive, only if the drive is actually present."""
+    """looper.toml on the thumb drive, only if the file is actually there (for reading)."""
     dev = media.get("device")
     if dev and not os.path.exists(dev):
         return None
@@ -165,6 +171,52 @@ def usb_config_path(media: dict) -> str | None:
         return path if os.path.isfile(path) else None
     except OSError:
         return None
+
+
+def usb_present(media: dict) -> bool:
+    """Is a USB drive present to persist settings onto? True when the configured block device
+    exists (the default). With device = "" (videos on the SD card) there's no drive to use."""
+    dev = media.get("device")
+    return bool(dev) and os.path.exists(dev)
+
+
+def _fmt_toml(v) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    return '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def update_toml_text(text: str, updates: dict) -> str:
+    """Set scalar keys in a TOML document in place, keeping comments, order and every other
+    section untouched. `updates` maps (section, key) -> value. A key already present is
+    rewritten; a missing key is added to its section; a missing section is appended."""
+    remaining = dict(updates)
+    out, section = [], ""
+    for line in text.splitlines():
+        m = re.match(r"\s*\[([^\]]+)\]", line)
+        if m:
+            section = m.group(1).strip()
+        else:
+            km = re.match(r"(\s*)([A-Za-z0-9_.-]+)(\s*=\s*)(.*)$", line)
+            if km and (section, km.group(2)) in remaining:
+                val = remaining.pop((section, km.group(2)))
+                cm = re.search(r"\s+#.*$", km.group(4))  # keep any inline comment
+                line = f"{km.group(1)}{km.group(2)}{km.group(3)}{_fmt_toml(val)}{cm.group(0) if cm else ''}"
+        out.append(line)
+    # keys whose section exists but the key did not: insert under the header
+    for sec in {s for s, _ in remaining}:
+        idx = next((i for i, l in enumerate(out) if re.match(rf"\s*\[{re.escape(sec)}\]\s*$", l)), None)
+        if idx is not None:
+            lines = [f"{k} = {_fmt_toml(v)}" for (s, k), v in list(remaining.items()) if s == sec]
+            out[idx + 1:idx + 1] = lines
+            for (s, k) in [key for key in remaining if key[0] == sec]:
+                remaining.pop((s, k))
+    # entirely new sections
+    for sec in dict.fromkeys(s for s, _ in remaining):
+        out += ["", f"[{sec}]"] + [f"{k} = {_fmt_toml(v)}" for (s, k), v in remaining.items() if s == sec]
+    return "\n".join(out).strip("\n") + "\n"
 
 
 def slug(name: str) -> str:
@@ -239,10 +291,17 @@ class Config:
             pass
         except Exception as e:
             log.error("ignoring %s: %s", self.setup_path, e)
-        usb = usb_config_path(self.data["media"])
-        if usb:
-            log.info("using settings from %s", usb)
-            _merge(self.data, read_toml(usb))
+        media = self.data["media"]
+        usb_read = usb_config_path(media)
+        if usb_read:
+            log.info("using settings from %s", usb_read)
+            _merge(self.data, read_toml(usb_read))
+        # The USB looper.toml is the "state file": runtime changes persist back to it so they
+        # travel with the drive, and it is authoritative (the Pi-local file is ignored while a
+        # drive is present). It's the target whenever a drive is present -- created on first
+        # change if it doesn't exist yet. With no drive, settings persist on the Pi as usual.
+        self.usb_config = (os.path.join(media["dir"], "looper.toml")
+                           if (usb_read or usb_present(media)) else None)
         m, dev = self.data["mqtt"], self.data["device"]
         custom = (dev.get("name") or "").strip()
         if not custom or custom == DEFAULTS["device"]["name"]:
@@ -255,7 +314,7 @@ class Config:
         dev["name"] = name
         m["name"] = m.get("name") or name
         m["node_id"] = m.get("node_id") or slug(name)
-        if os.path.exists(self.settings_path):
+        if not self.usb_config and os.path.exists(self.settings_path):
             try:
                 with open(self.settings_path) as f:
                     for k, v in json.load(f).items():
@@ -289,6 +348,9 @@ class Config:
         return {k: self.get(k) for k in TUNABLES}
 
     def _save(self) -> None:
+        if self.usb_config:
+            self._save_usb()
+            return
         # atomic write so a power cut can't corrupt the file
         try:
             os.makedirs(self.state_dir, exist_ok=True)
@@ -300,3 +362,22 @@ class Config:
             os.replace(tmp, self.settings_path)
         except OSError as e:
             log.error("could not save settings: %s", e)
+
+    def _save_usb(self) -> None:
+        """Persist runtime changes into the USB looper.toml so they travel with the drive. The
+        USB is mounted read-only, so a small root helper remounts it, writes atomically, syncs
+        and remounts it read-only again. Failure is logged, never fatal (the change still
+        applies in memory for this run)."""
+        updates = {(TUNABLES[k][0], TUNABLES[k][1]): v for k, v in self.overrides.items()}
+        try:
+            try:
+                with open(self.usb_config) as f:
+                    text = f.read()
+            except OSError:
+                text = ""
+            new = update_toml_text(text, updates)
+            subprocess.run(["sudo", "-n", USB_WRITE_HELPER, self.usb_config],
+                           input=new, text=True, timeout=30, check=True,
+                           capture_output=True)
+        except Exception as e:
+            log.error("could not persist settings to the USB drive: %s", e)

@@ -358,6 +358,68 @@ class ConfigLayerTests(unittest.TestCase):
         self.assertEqual(c.section("mqtt")["name"], "USB Name")
         self.assertEqual(c.get("volume"), 30)
 
+    def test_update_toml_text(self):
+        src = ('[playback]\nshuffle = true   # on by default\nrepeat = "all"\n\n'
+               '[snapshot]\ninterval = 5\n')
+        out = config_mod.update_toml_text(src, {
+            ("playback", "shuffle"): False,        # existing key: rewrite, keep the comment
+            ("playback", "volume"): 55,            # missing key in an existing section
+            ("status", "position_interval"): 20,   # a whole new section
+        })
+        self.assertIn("shuffle = false   # on by default", out)
+        self.assertIn('repeat = "all"', out)       # untouched
+        self.assertIn("interval = 5", out)         # other section untouched
+        parsed = __import__("tomllib").loads(out)  # must still be valid TOML
+        self.assertEqual(parsed["playback"], {"shuffle": False, "repeat": "all", "volume": 55})
+        self.assertEqual(parsed["status"]["position_interval"], 20)
+
+    def test_settings_persist_to_usb_drive(self):
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        media = os.path.join(d, "usb")
+        os.makedirs(media)
+        boot = os.path.join(d, "looper.toml")
+        with open(boot, "w") as f:
+            f.write(f'[media]\ndir = "{media}"\ndevice = ""\n')
+        with open(os.path.join(media, "looper.toml"), "w") as f:
+            f.write(f'[media]\ndir = "{media}"\ndevice = ""\n[playback]\nshuffle = true\n')
+        c = config_mod.Config(boot, d)
+        self.assertEqual(c.usb_config, os.path.join(media, "looper.toml"))
+        captured = {}
+
+        def fake_run(cmd, input=None, **kw):
+            captured["cmd"], captured["input"] = cmd, input
+            return mock.Mock(returncode=0)
+
+        with mock.patch("looper.config.subprocess.run", fake_run):
+            c.set("volume", 42)
+        self.assertIn(config_mod.USB_WRITE_HELPER, captured["cmd"])
+        self.assertIn(os.path.join(media, "looper.toml"), captured["cmd"])
+        self.assertIn("volume = 42", captured["input"])          # written back to the USB toml
+        self.assertFalse(os.path.exists(c.settings_path))        # not persisted on the Pi
+
+    def test_usb_present_is_target_even_without_a_file(self):
+        # a drive is in (its block device exists) but has no looper.toml yet: still the target,
+        # and a change creates it -- settings persist to the drive, not the Pi
+        from unittest import mock
+        d = tempfile.mkdtemp()
+        media = os.path.join(d, "usb")
+        os.makedirs(media)
+        fakedev = os.path.join(d, "sda1")
+        open(fakedev, "w").close()
+        boot = os.path.join(d, "looper.toml")
+        with open(boot, "w") as f:
+            f.write(f'[media]\ndir = "{media}"\ndevice = "{fakedev}"\n')
+        c = config_mod.Config(boot, d)
+        self.assertEqual(c.usb_config, os.path.join(media, "looper.toml"))
+        captured = {}
+        with mock.patch("looper.config.subprocess.run",
+                        lambda cmd, input=None, **kw: captured.update(cmd=cmd, input=input) or mock.Mock(returncode=0)):
+            c.set("repeat", "one")
+        self.assertIn("[playback]", captured["input"])           # a fresh toml was built
+        self.assertIn('repeat = "one"', captured["input"])
+        self.assertFalse(os.path.exists(c.settings_path))
+
 
 class ControllerOverlayTests(unittest.TestCase):
     """The controller shows the setup screen while the setup service says so."""
